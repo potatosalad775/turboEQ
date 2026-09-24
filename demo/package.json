@@ -8,7 +8,7 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
-		"turboeq": "file:.."
+		"@potatosalad775/turboeq": "file:.."
 	},
 	"devDependencies": {
 		"vite": "^8.3.0"

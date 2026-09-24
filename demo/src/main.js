@@ -1,4 +1,4 @@
-import { eqapoParametric } from 'turboeq/eqapo';
+import { eqapoParametric } from '@potatosalad775/turboeq/eqapo';
 import { filterResponse } from './biquad.js';
 import { alignment, interpolate, logGrid, parseCurve } from './curve.js';
 import { renderPlot } from './plot.js';

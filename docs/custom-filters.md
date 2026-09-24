@@ -114,7 +114,7 @@ it is turboEQ's default.
 A separate, optional module:
 
 ```js
-import { eqapoParametric } from 'turboeq/eqapo';
+import { eqapoParametric } from '@potatosalad775/turboeq/eqapo';
 
 const text = eqapoParametric(result);
 ```
@@ -132,8 +132,8 @@ The package ships two builds. `turboeq-simd.wasm` uses WebAssembly SIMD and is f
 `turboeq.wasm` runs on engines without it. Serve both and pick the same way `load()` does:
 
 ```js
-import simdUrl from 'turboeq/turboeq-simd.wasm?url'; // Vite; or any URL you serve them at
-import plainUrl from 'turboeq/turboeq.wasm?url';
+import simdUrl from '@potatosalad775/turboeq/turboeq-simd.wasm?url'; // Vite; or any URL you serve them at
+import plainUrl from '@potatosalad775/turboeq/turboeq.wasm?url';
 
 const eq = await TurboEQ.instantiate(fetch(TurboEQ.supportsSimd() ? simdUrl : plainUrl));
 ```

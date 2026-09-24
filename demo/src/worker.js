@@ -4,7 +4,7 @@
  * `run` alone, so they measure turboEQ and not the message round trip.
  */
 
-import { TurboEQ } from 'turboeq';
+import { TurboEQ } from '@potatosalad775/turboeq';
 
 const t0 = performance.now();
 const ready = TurboEQ.load().then(

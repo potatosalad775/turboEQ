@@ -9,7 +9,9 @@ and a user-facing doc states it too, update both.
 
 **Status.** The port is complete and green against the parity harness, and CI
 (`.github/workflows/ci.yml`) holds it there. It is packaged for npm as
-`turboeq` (npm refuses capitals in new names): the binding, both `.d.ts` files,
+`@potatosalad775/turboeq` (npm refuses capitals in new names, and refused
+unscoped `turboeq` as too close to `turbo`; `publishConfig.access` is `public`
+because a scoped package is otherwise private): the binding, both `.d.ts` files,
 both wasm builds and `NOTICE`. `prepack` builds the wasm and copies
 `turboeq.wasm` and `turboeq-simd.wasm` into `js/`, where they are gitignored,
 so `TurboEQ.load()` finds them beside the binding. CI installs the packed tarball and runs a fit through it.

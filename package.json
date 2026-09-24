@@ -1,5 +1,5 @@
 {
-	"name": "turboeq",
+	"name": "@potatosalad775/turboeq",
 	"version": "0.1.0",
 	"description": "AutoEq's parametric EQ optimizer, ported to Zig and compiled to WebAssembly",
 	"keywords": [
@@ -46,6 +46,9 @@
 		"NOTICE"
 	],
 	"sideEffects": false,
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"build": "zig build wasm && cp zig-out/bin/turboeq.wasm zig-out/bin/turboeq-simd.wasm js/",
 		"prepack": "npm run build",

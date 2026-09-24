@@ -55,13 +55,13 @@ jobs:
       - name: npm package
         run: |
           npm pack --pack-destination "$RUNNER_TEMP"
-          tar tzf "$RUNNER_TEMP"/turboeq-*.tgz | grep -qx package/NOTICE
+          tar tzf "$RUNNER_TEMP"/potatosalad775-turboeq-*.tgz | grep -qx package/NOTICE
           cd "$RUNNER_TEMP"
           npm init -y > /dev/null
-          npm install ./turboeq-*.tgz
+          npm install ./potatosalad775-turboeq-*.tgz
           node --input-type=module -e "
-            import { TurboEQ } from 'turboeq';
-            import { eqapoParametric } from 'turboeq/eqapo';
+            import { TurboEQ } from '@potatosalad775/turboeq';
+            import { eqapoParametric } from '@potatosalad775/turboeq/eqapo';
             const eq = await TurboEQ.load();
             const bump = [[20, 0], [1000, 3], [20000, 0]];
             const result = eq.run(bump, [[20, 0], [20000, 0]]);

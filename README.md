@@ -29,11 +29,11 @@ SIMD. [BENCHMARKS.md](BENCHMARKS.md) has every number and the command behind it.
 ## Quick start
 
 ```sh
-npm install turboeq
+npm install @potatosalad775/turboeq
 ```
 
 ```js
-import { TurboEQ } from 'turboeq';
+import { TurboEQ } from '@potatosalad775/turboeq';
 
 const eq = await TurboEQ.load();
 

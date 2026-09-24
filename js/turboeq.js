@@ -8,7 +8,7 @@
  *
  * Usage:
  *
- *     import { TurboEQ } from 'turboeq';
+ *     import { TurboEQ } from '@potatosalad775/turboeq';
  *
  *     const eq = await TurboEQ.load();
  *     const { filters, rmse } = eq.run(sourcePoints, targetPoints, {
