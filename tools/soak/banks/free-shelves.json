@@ -1,0 +1,16 @@
+[
+	{
+		"filters": [
+			{ "type": "low_shelf" },
+			{ "type": "high_shelf" },
+			{ "type": "peaking" },
+			{ "type": "peaking" },
+			{ "type": "peaking" },
+			{ "type": "peaking" },
+			{ "type": "peaking" },
+			{ "type": "peaking" },
+			{ "type": "peaking" },
+			{ "type": "peaking" }
+		]
+	}
+]

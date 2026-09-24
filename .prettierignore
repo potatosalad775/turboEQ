@@ -1,0 +1,7 @@
+AutoEq/
+zig-out/
+.zig-cache/
+tools/parity/fixtures/
+candidate*.json
+package-lock.json
+demo/dist/

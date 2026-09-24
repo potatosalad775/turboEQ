@@ -1,0 +1,70 @@
+{
+ "cases": [
+  {
+   "file": "gentle_vs_flat.json",
+   "id": "gentle_vs_flat",
+   "points": 479,
+   "source": "gentle",
+   "target": "flat"
+  },
+  {
+   "file": "bumpy_vs_flat.json",
+   "id": "bumpy_vs_flat",
+   "points": 479,
+   "source": "bumpy",
+   "target": "flat"
+  },
+  {
+   "file": "bumpy_vs_harman.json",
+   "id": "bumpy_vs_harman",
+   "points": 479,
+   "source": "bumpy",
+   "target": "harman_ish"
+  },
+  {
+   "file": "noisy_dip_vs_flat.json",
+   "id": "noisy_dip_vs_flat",
+   "points": 479,
+   "source": "noisy_narrow_dip",
+   "target": "flat"
+  },
+  {
+   "file": "bumpy_coarse_grid.json",
+   "id": "bumpy_coarse_grid",
+   "points": 120,
+   "source": "bumpy",
+   "target": "flat"
+  },
+  {
+   "file": "real_rough_treble.json",
+   "id": "real_rough_treble",
+   "points": 479,
+   "source": "rough_treble_iem.txt",
+   "target": "target_harman_ie_2019v2.txt"
+  },
+  {
+   "file": "real_deep_dip.json",
+   "id": "real_deep_dip",
+   "points": 956,
+   "source": "deep_dip_overear.txt",
+   "target": "flat"
+  },
+  {
+   "file": "real_bass_shelf.json",
+   "id": "real_bass_shelf",
+   "points": 957,
+   "source": "bass_heavy_iem.txt",
+   "target": "target_harman_ie_2019v2.txt"
+  }
+ ],
+ "meta": {
+  "autoeq_commit": "7ae0f56d53074872b028649617a22bbb4232feb7",
+  "autoeq_version": "4.1.2",
+  "fs": 44100.0,
+  "min_mean_error": true,
+  "numpy": "2.5.3",
+  "python": "3.14.3",
+  "round_digits": 9,
+  "scipy": "1.18.1"
+ }
+}

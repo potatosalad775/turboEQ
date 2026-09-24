@@ -1,0 +1,62 @@
+{
+	"name": "turboeq",
+	"version": "0.1.0",
+	"description": "AutoEq's parametric EQ optimizer, ported to Zig and compiled to WebAssembly",
+	"keywords": [
+		"autoeq",
+		"equalizer",
+		"parametric-eq",
+		"peq",
+		"headphones",
+		"frequency-response",
+		"equalizerapo",
+		"webassembly",
+		"wasm"
+	],
+	"homepage": "https://github.com/potatosalad775/turboEQ#readme",
+	"bugs": "https://github.com/potatosalad775/turboEQ/issues",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/potatosalad775/turboEQ.git"
+	},
+	"author": "potatosalad775",
+	"license": "MPL-2.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./js/turboeq.d.ts",
+			"default": "./js/turboeq.js"
+		},
+		"./eqapo": {
+			"types": "./js/eqapo.d.ts",
+			"default": "./js/eqapo.js"
+		},
+		"./turboeq.wasm": "./js/turboeq.wasm",
+		"./turboeq-simd.wasm": "./js/turboeq-simd.wasm",
+		"./package.json": "./package.json"
+	},
+	"types": "./js/turboeq.d.ts",
+	"files": [
+		"js/turboeq.js",
+		"js/turboeq.d.ts",
+		"js/turboeq.wasm",
+		"js/turboeq-simd.wasm",
+		"js/eqapo.js",
+		"js/eqapo.d.ts",
+		"NOTICE"
+	],
+	"sideEffects": false,
+	"scripts": {
+		"build": "zig build wasm && cp zig-out/bin/turboeq.wasm zig-out/bin/turboeq-simd.wasm js/",
+		"prepack": "npm run build",
+		"format": "prettier --write .",
+		"lint": "prettier --check .",
+		"smoke": "node tools/wasm_smoke/smoke.mjs"
+	},
+	"devDependencies": {
+		"prettier": "^3.9.6"
+	},
+	"engines": {
+		"node": ">=20"
+	}
+}

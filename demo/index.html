@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>turboEQ demo</title>
+		<meta
+			name="description"
+			content="AutoEq's parametric EQ optimizer, running in your browser as WebAssembly."
+		/>
+		<link rel="stylesheet" href="./src/style.css" />
+	</head>
+	<body>
+		<header>
+			<div>
+				<h1>turboEQ</h1>
+				<p class="lede">
+					AutoEq's parametric EQ optimizer, compiled to WebAssembly. Every fit below runs in this
+					tab.
+				</p>
+			</div>
+			<nav>
+				<a href="https://github.com/potatosalad775/turboEQ">GitHub</a>
+				<a href="https://www.npmjs.com/package/turboeq">npm</a>
+			</nav>
+		</header>
+
+		<main>
+			<aside class="controls">
+				<section class="card" id="source-card">
+					<h2>Measurement</h2>
+					<select id="source-select" aria-label="Measurement"></select>
+					<label class="upload">
+						Upload a file…
+						<input id="source-file" type="file" accept=".txt,.csv,text/plain,text/csv" />
+					</label>
+					<p class="hint">Or drop one here. Frequency and dB columns, CSV or tab-separated.</p>
+					<p class="error" id="source-error" role="alert"></p>
+				</section>
+
+				<section class="card" id="target-card">
+					<h2>Target</h2>
+					<select id="target-select" aria-label="Target"></select>
+					<label class="upload">
+						Upload a file…
+						<input id="target-file" type="file" accept=".txt,.csv,text/plain,text/csv" />
+					</label>
+					<p class="error" id="target-error" role="alert"></p>
+				</section>
+
+				<section class="card">
+					<h2>Filters</h2>
+					<label class="field">
+						<span>Peaking bands <output id="peaking-value"></output></span>
+						<!-- Past 20, a fit takes seconds and rarely sounds better. -->
+						<input id="peaking" type="range" min="1" max="20" value="8" />
+					</label>
+					<label class="field">
+						<span>Low and high shelf</span>
+						<select id="shelves">
+							<option value="fixed">Fixed at 105 Hz and 10 kHz</option>
+							<option value="free">Free frequency and Q</option>
+							<option value="off">None</option>
+						</select>
+					</label>
+					<div class="field">
+						<span>Filter frequency range</span>
+						<div class="range">
+							<input
+								id="min-fc"
+								type="number"
+								min="20"
+								max="20000"
+								step="1"
+								value="20"
+								aria-label="Lowest filter frequency, Hz"
+							/>
+							<span>to</span>
+							<input
+								id="max-fc"
+								type="number"
+								min="20"
+								max="20000"
+								step="1"
+								value="10000"
+								aria-label="Highest filter frequency, Hz"
+							/>
+							<span>Hz</span>
+						</div>
+					</div>
+					<label class="field">
+						<span>Fit mode</span>
+						<!-- AutoEq smooths the treble over two octaves, limits the correction to
+						     18 dB per octave and scores only the mean level above 10 kHz. Exact
+						     match turns all three off; max boost still applies. -->
+						<select id="fit-mode">
+							<option value="autoeq">AutoEq (smoothed treble)</option>
+							<option value="exact">Exact match</option>
+						</select>
+					</label>
+					<p class="hint" id="range-hint"></p>
+					<p class="error" id="range-error" role="alert"></p>
+					<label class="field">
+						<span>Max boost <output id="max-gain-value"></output></span>
+						<input id="max-gain" type="range" min="0" max="12" step="0.5" value="6" />
+					</label>
+					<label class="field">
+						<span>Sample rate</span>
+						<select id="sample-rate">
+							<option value="44100">44.1 kHz</option>
+							<option value="48000">48 kHz</option>
+							<option value="96000">96 kHz</option>
+						</select>
+					</label>
+				</section>
+			</aside>
+
+			<div class="results">
+				<div class="stats">
+					<div class="stat accent">
+						<span class="label">Fit time</span>
+						<span class="value" id="fit-ms">–</span>
+						<span class="sub" id="fit-detail"></span>
+					</div>
+					<div class="stat">
+						<span class="label">RMSE</span>
+						<span class="value" id="rmse">–</span>
+						<span class="sub" id="rmse-detail">against the equalization curve</span>
+					</div>
+					<div class="stat">
+						<span class="label">Preamp</span>
+						<span class="value" id="preamp">–</span>
+						<span class="sub" id="filter-count"></span>
+					</div>
+					<div class="stat">
+						<span class="label">Module</span>
+						<span class="value" id="load-ms">–</span>
+						<span class="sub" id="load-detail">loading turboeq.wasm</span>
+					</div>
+				</div>
+
+				<div class="bench">
+					<button id="bench" type="button" disabled>Time 50 runs</button>
+					<span id="bench-result"></span>
+					<span class="status" id="status" aria-live="polite"></span>
+				</div>
+				<p class="error" id="fit-error" role="alert"></p>
+
+				<section class="card">
+					<div class="plot-head">
+						<h2>Frequency response</h2>
+						<ul class="legend">
+							<li class="target">Target</li>
+							<li class="measured">Measurement</li>
+							<li class="equalized">Equalized</li>
+						</ul>
+					</div>
+					<div class="plot" id="fr-plot"></div>
+				</section>
+
+				<section class="card">
+					<div class="plot-head">
+						<h2>Equalizer</h2>
+						<ul class="legend">
+							<li class="eq">Total</li>
+							<li class="part">Each filter</li>
+						</ul>
+					</div>
+					<div class="plot short" id="eq-plot"></div>
+				</section>
+
+				<div class="output">
+					<section class="card">
+						<h2>Filters</h2>
+						<table>
+							<thead>
+								<tr>
+									<th>#</th>
+									<th>Type</th>
+									<th>Fc (Hz)</th>
+									<th>Q</th>
+									<th>Gain (dB)</th>
+								</tr>
+							</thead>
+							<tbody id="filters"></tbody>
+						</table>
+					</section>
+					<section class="card">
+						<div class="plot-head">
+							<h2>EqualizerAPO</h2>
+							<div class="actions">
+								<button id="copy" type="button">Copy</button>
+								<button id="download" type="button">Download</button>
+							</div>
+						</div>
+						<pre id="apo"></pre>
+					</section>
+				</div>
+			</div>
+		</main>
+
+		<footer>
+			<p>
+				turboEQ is MPL-2.0, derived from
+				<a href="https://github.com/jaakkopasanen/AutoEq">AutoEq</a> (MIT, Jaakko Pasanen) and SciPy
+				(BSD-3-Clause). <a href="./NOTICE.txt">Licence notices</a>. Sample measurements by Jinwoo
+				Lee.
+			</p>
+		</footer>
+
+		<script type="module" src="./src/main.js"></script>
+	</body>
+</html>

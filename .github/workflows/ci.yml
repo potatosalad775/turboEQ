@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # No submodules: the fixtures are committed, and only regenerating them
+      # needs the AutoEq checkout.
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Formatting
+        run: |
+          zig fmt --check src tools build.zig
+          npm ci
+          npm run lint
+
+      - name: Unit tests
+        run: zig build test --summary all
+
+      - name: Parity against upstream
+        run: |
+          zig build dump
+          python tools/parity/compare.py candidate.json --strict
+
+      # The unit tests and the parity harness both run on the host target.
+      # This is the only step that exercises the artifact a browser gets.
+      - name: wasm smoke test
+        run: |
+          zig build wasm
+          ls -l zig-out/bin/turboeq.wasm
+          node tools/wasm_smoke/smoke.mjs
+          node tools/soak/soak.mjs --target tools/parity/real/target_harman_ie_2019v2.txt tools/parity/real
+
+      # The tarball `npm publish` would upload, installed and imported by name,
+      # so a file missing from `files` or `exports` fails here and not for a user.
+      - name: npm package
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          tar tzf "$RUNNER_TEMP"/turboeq-*.tgz | grep -qx package/NOTICE
+          cd "$RUNNER_TEMP"
+          npm init -y > /dev/null
+          npm install ./turboeq-*.tgz
+          node --input-type=module -e "
+            import { TurboEQ } from 'turboeq';
+            import { eqapoParametric } from 'turboeq/eqapo';
+            const eq = await TurboEQ.load();
+            const bump = [[20, 0], [1000, 3], [20000, 0]];
+            const result = eq.run(bump, [[20, 0], [20000, 0]]);
+            if (result.filters.length !== 10) throw new Error('expected ten filters');
+            console.log(eqapoParametric(result));
+          "

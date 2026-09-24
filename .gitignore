@@ -1,0 +1,20 @@
+.zig-cache/
+zig-out/
+*.o
+__pycache__/
+*.pyc
+candidate*.json
+!tools/parity/fixtures/*.json
+
+# The upstream reference checkout lives in AutoEq/, a submodule pinned to the
+# commit in CLAUDE.md. It is read-only and only fixture regeneration needs it;
+# the fixtures themselves are committed, so `zig build test` and `compare.py`
+# work without checking it out at all.
+node_modules/
+turboeq_fit.csv
+
+# Built by `npm run build`, shipped by `npm pack`.
+js/turboeq.wasm
+js/turboeq-simd.wasm
+*.tgz
+demo/dist/
