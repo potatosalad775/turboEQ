@@ -165,7 +165,16 @@ const Opt = enum(usize) {
     /// shape too. An opt-in departure from upstream's objective.
     loss_flatten_f = 42,
 
-    const count = 43;
+    /// Zero drops each peaking filter's sharpness penalty from the loss.
+    /// Non-zero, or NaN, keeps it, as upstream does. An opt-in departure from
+    /// upstream's objective, like `loss_flatten_f`.
+    sharpness_penalty = 43,
+
+    /// Octaves of the last smoothing pass over the equalization curve, 1/5
+    /// upstream. Zero skips it. An opt-in departure, like `loss_flatten_f`.
+    equalization_window_size = 44,
+
+    const count = 45;
 };
 
 fn optAt(opts: []const f64, which: Opt, fallback: f64) f64 {
@@ -217,6 +226,11 @@ fn configFrom(opts: []const f64) pipeline.Config {
         .treble_f_lower = optAt(opts, .treble_f_lower, defaults.equalization.treble_f_lower),
         .treble_f_upper = optAt(opts, .treble_f_upper, defaults.equalization.treble_f_upper),
         .treble_gain_k = optAt(opts, .treble_gain_k, defaults.equalization.treble_gain_k),
+        .equalization_window_size = optAt(
+            opts,
+            .equalization_window_size,
+            defaults.equalization.equalization_window_size,
+        ),
     };
     // `smoothen` asserts on a non-ascending transition band, and a host that
     // sent one would trap rather than get an error code back.
@@ -247,6 +261,11 @@ fn configFrom(opts: []const f64) pipeline.Config {
         .min_f = optAt(opts, .loss_min_f, defaults.optimizer.min_f),
         .max_f = optAt(opts, .loss_max_f, defaults.optimizer.max_f),
         .flatten_f = optAt(opts, .loss_flatten_f, defaults.optimizer.flatten_f),
+        .sharpness_penalty = optFlag(
+            opts,
+            .sharpness_penalty,
+            defaults.optimizer.sharpness_penalty,
+        ),
     };
     if (cfg.optimizer.min_f > cfg.optimizer.max_f) {
         std.mem.swap(f64, &cfg.optimizer.min_f, &cfg.optimizer.max_f);

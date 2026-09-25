@@ -28,6 +28,12 @@ the optimizer chose.
 `shelfLimits` sets the shelves' gain window separately. Without it, the shelves take the
 gain window from `limits`.
 
+`shelfPlacement: 'free'` lets the shelves move as well: their frequency and Q are fitted
+inside `shelfLimits`, each bound defaulting to AutoEq's shelf window (20 Hz to 10 kHz, Q 0.4
+to 0.7). The default, `'pinned'`, keeps them at 105 Hz and 10 kHz with Q 0.7, as every
+AutoEq preset does. Free shelves fit better on most real curves, most of all when there are
+few bands and two pinned shelves are a large share of them.
+
 ## Graphic EQ
 
 `graphicBank` pins `fc` and Q to the sliders and fits only the gains:
@@ -95,7 +101,8 @@ so passing both is an error rather than a guess.
 ### Free shelves
 
 Every shipped AutoEq preset pins the shelves. To let the optimizer move them, leave out
-`fc` and `q`, as in `{ type: 'low_shelf' }`. They then range over AutoEq's default shelf
+`fc` and `q`, as in `{ type: 'low_shelf' }`, or build the bank with `peakingBank`'s
+`shelfPlacement: 'free'`. They then range over AutoEq's default shelf
 bounds (Q 0.4 to 0.7).
 
 Unpinned shelves place themselves with AutoEq's own `init()` heuristics. This lowers the

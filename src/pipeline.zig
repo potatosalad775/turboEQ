@@ -343,10 +343,12 @@ pub fn run(
         }
         at += slice.len;
 
-        // A bank may narrow the loss band, but where the loss flattens is the
-        // caller's choice for the whole run; no bank upstream records one.
+        // A bank may narrow the loss band, but where the loss flattens and
+        // whether it penalizes sharp bands are the caller's choice for the
+        // whole run; no bank upstream records either.
         var opts = bank.optimizer orelse cfg.optimizer;
         opts.flatten_f = cfg.optimizer.flatten_f;
+        opts.sharpness_penalty = cfg.optimizer.sharpness_penalty;
         var fit = try peq.Peq.init(allocator, optimizer_f, cfg.fs, slice, residual, opts);
         defer fit.deinit();
 

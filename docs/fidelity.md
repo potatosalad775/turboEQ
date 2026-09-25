@@ -85,18 +85,26 @@ is available as `configs.autoeq_cli_default` in Zig, or as `banks` in JavaScript
 
 **Shelves stay pinned** at 105 Hz and 10 kHz, Q 0.7, with only their gain fitted. Every
 preset AutoEq ships does the same. Freeing them lowers the loss on most real curves, at 1.5x
-the fit time, and you can do it through [`banks`](custom-filters.md#describing-the-filters-yourself).
+the fit time, and you can do it with `peakingBank`'s `shelfPlacement: 'free'` or through
+[`banks`](custom-filters.md#describing-the-filters-yourself).
 
 **No `max_time`.** The wasm build has no clock. `maxEvaluations` caps the work instead, and
 unlike a wall-clock budget it gives the same result on every machine.
 
 [BENCHMARKS.md](../BENCHMARKS.md) has the measurements behind each of these.
 
-## The one change to the objective
+## Changes to the objective
 
-AutoEq scores only the mean level above 10 kHz. `lossFlattenF` moves or removes that line,
-for rigs whose treble you trust. It is the only option that changes what the fit optimizes,
-and it only applies when you set it. [Exact match](exact-match.md) covers it.
+Three options change what the fit optimizes, and each applies only when you set it:
+
+- `lossFlattenF` moves or removes the line above which AutoEq scores only the mean level,
+  10 kHz, for rigs whose treble you trust.
+- `sharpnessPenalty: false` drops the penalty AutoEq puts on peaking bands steeper than
+  about 18 dB per octave.
+- `equalizationWindowSize` changes or removes the fifth-octave smoothing AutoEq hardcodes as
+  the last step of building the curve the optimizer fits.
+
+`fit: 'exact'` sets all three. [Exact match](exact-match.md) covers them.
 
 ## Out of scope
 

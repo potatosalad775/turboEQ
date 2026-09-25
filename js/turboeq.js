@@ -146,10 +146,46 @@ const OPTION_SLOTS = {
 	 * 10000 is AutoEq's; `Infinity` scores the treble's shape as well. A
 	 * departure from upstream's objective, so off unless asked for.
 	 */
-	lossFlattenF: 42
+	lossFlattenF: 42,
+	/**
+	 * Add each peaking band's sharpness penalty to the loss, as AutoEq does.
+	 * `false` stops the fit from shying away from bands steeper than about
+	 * 18 dB per octave. A departure from upstream's objective, so on unless
+	 * turned off.
+	 */
+	sharpnessPenalty: 43,
+	/**
+	 * Octaves of the last smoothing pass over the equalization curve. AutoEq
+	 * hardcodes 1/5, which blurs anything narrower out of what the fit
+	 * aims at; 0 skips the pass. A departure from upstream's objective.
+	 */
+	equalizationWindowSize: 44
 };
 
-const OPTION_COUNT = 43;
+const OPTION_COUNT = 45;
+
+/**
+ * What `fit: 'exact'` stands for: every AutoEq choice that keeps a fit from
+ * following the curve as a graph shows it, turned off. `trebleWindowSize` and
+ * `maxSlope` are parameters AutoEq itself exposes; the other three depart
+ * from its objective. An option the caller passes outright wins over its
+ * entry here.
+ */
+export const EXACT_MATCH_OPTIONS = Object.freeze({
+	/** Score the treble's shape, not only its mean. */
+	lossFlattenF: Infinity,
+	/** The same smoothing in the treble as below it. */
+	trebleWindowSize: 1 / 12,
+	/** No slope limit on the correction. */
+	maxSlope: Infinity,
+	/** Narrow, deep bands are allowed to cost what they fit. */
+	sharpnessPenalty: false,
+	/** Nothing blurs the target after the slope limit, which is off anyway. */
+	equalizationWindowSize: 0
+});
+
+/** Where `fit: 'exact'` lets the built-in bank's peaking bands reach, Hz. */
+const EXACT_MATCH_MAX_FC = 20000;
 
 /**
  * Options that describe the built-in bank, and so say nothing once `banks`
@@ -356,6 +392,24 @@ function resolveRange(what, lo, hi, defaultLo, defaultHi, mode) {
 }
 
 /**
+ * `options` with `EXACT_MATCH_OPTIONS` underneath it. The built-in bank's
+ * peaking bands may also reach 20 kHz, since exact match is the mode that
+ * scores the shape up there; with `banks` the caller's bounds say where bands
+ * sit, and adding a limit option would contradict them.
+ *
+ * @param {Record<string, unknown>} options
+ * @param {boolean} builtInBank
+ */
+function exactMatch(options, builtInBank) {
+	const given = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined));
+	return {
+		...EXACT_MATCH_OPTIONS,
+		...(builtInBank ? { peakingMaxFc: EXACT_MATCH_MAX_FC } : {}),
+		...given
+	};
+}
+
+/**
  * One filter in a bank. Everything but `type` is optional: a value given pins
  * that parameter, a bound left out takes AutoEq's default for the type, and a
  * bound pair collapsed to a point pins the parameter too.
@@ -523,7 +577,11 @@ export class TurboEQ {
 	 * @returns {Result}
 	 */
 	run(source, target, options = {}) {
-		const { banks = null, soundSignature = null, ...slots } = options;
+		const { banks = null, soundSignature = null, fit = 'autoeq', ...given } = options;
+		if (fit !== 'autoeq' && fit !== 'exact') {
+			throw new TurboEQError(`fit must be 'autoeq' or 'exact', got "${fit}"`);
+		}
+		const slots = fit === 'exact' ? exactMatch(given, banks === null) : given;
 		if (banks !== null) {
 			if (!Array.isArray(banks) || banks.length === 0) {
 				throw new TurboEQError('banks must be a non-empty array of filter banks');
@@ -576,10 +634,17 @@ export class TurboEQ {
 	 *
 	 * @param {object} [spec]
 	 * @param {number} [spec.peaking] Peaking bands. Shelves are not counted here.
-	 * @param {boolean} [spec.shelves] Pinned 105 Hz and 10 kHz shelves, gain free.
+	 * @param {boolean} [spec.shelves] A low and a high shelf ahead of the peaking bands.
+	 * @param {'pinned' | 'free'} [spec.shelfPlacement] `'pinned'`, the default, holds
+	 *   the shelves at 105 Hz and 10 kHz with Q 0.7 and fits their gain, as every
+	 *   shipped upstream preset does. `'free'` fits their fc and Q too, inside
+	 *   `shelfLimits`, which upstream's `init()` supports and no preset uses. It
+	 *   fits better on most real curves, and most of all at small band counts,
+	 *   where two pinned shelves are a large share of the budget.
 	 * @param {BandLimits} [spec.limits] Applied to the peaking bands.
-	 * @param {BandLimits} [spec.shelfLimits] Applied to the shelves. Gain only,
-	 *   since their fc and Q are pinned. Defaults to `limits`'s gain window.
+	 * @param {BandLimits} [spec.shelfLimits] Applied to the shelves. Pinned shelves
+	 *   read only its gain window, which defaults to `limits`'s. Free shelves read
+	 *   all of it, each bound defaulting to AutoEq's shelf window.
 	 * @param {'intersect' | 'as-given'} [spec.bounds] What to do where `limits`
 	 *   is wider than AutoEq's defaults. Intersects by default.
 	 * @returns {BankSpec}
@@ -587,10 +652,14 @@ export class TurboEQ {
 	peakingBank({
 		peaking = 8,
 		shelves = true,
+		shelfPlacement = 'pinned',
 		limits = {},
 		shelfLimits = undefined,
 		bounds = 'intersect'
 	} = {}) {
+		if (shelfPlacement !== 'pinned' && shelfPlacement !== 'free') {
+			throw new TurboEQError(`shelfPlacement must be 'pinned' or 'free', got "${shelfPlacement}"`);
+		}
 		const count = Math.floor(peaking);
 		if (!Number.isFinite(count) || count < 0) {
 			throw new TurboEQError(`peaking must be a non-negative count, got ${peaking}`);
@@ -604,20 +673,23 @@ export class TurboEQ {
 		/** @type {FilterSpec[]} */
 		const filters = [];
 		if (shelves) {
-			const gains = shelfLimits ?? { minGain: limits.minGain, maxGain: limits.maxGain };
-			const shelf = this.defaultLimits('low_shelf');
-			const [minGain, maxGain] = resolveRange(
-				'shelf gain',
-				gains.minGain,
-				gains.maxGain,
-				shelf.minGain,
-				shelf.maxGain,
-				bounds
-			);
-			// fc and Q pinned, which is what every shipped upstream preset does;
-			// a pinned parameter needs no bounds, so none are written.
-			filters.push({ type: 'low_shelf', fc: 105, q: 0.7, minGain, maxGain });
-			filters.push({ type: 'high_shelf', fc: 10000, q: 0.7, minGain, maxGain });
+			const given = shelfLimits ?? { minGain: limits.minGain, maxGain: limits.maxGain };
+			for (const type of /** @type {const} */ (['low_shelf', 'high_shelf'])) {
+				const shelf = this.defaultLimits(type);
+				const range = (what, lo, hi) =>
+					resolveRange(`shelf ${what}`, lo, hi, shelf[`min${what}`], shelf[`max${what}`], bounds);
+				const [minGain, maxGain] = range('Gain', given.minGain, given.maxGain);
+				if (shelfPlacement === 'free') {
+					const [minFc, maxFc] = range('Fc', given.minFc, given.maxFc);
+					const [minQ, maxQ] = range('Q', given.minQ, given.maxQ);
+					filters.push({ type, minFc, maxFc, minQ, maxQ, minGain, maxGain });
+				} else {
+					// fc and Q pinned, which is what every shipped upstream preset
+					// does; a pinned parameter needs no bounds, so none are written.
+					const fc = type === 'low_shelf' ? 105 : 10000;
+					filters.push({ type, fc, q: 0.7, minGain, maxGain });
+				}
+			}
 		}
 
 		const peak = this.defaultLimits('peaking');
@@ -800,6 +872,7 @@ export class TurboEQ {
  * structure rather than a number.
  *
  * @typedef {Partial<Record<keyof typeof OPTION_SLOTS, number | boolean>> & {
+ *   fit?: 'autoeq' | 'exact',
  *   banks?: BankSpec[] | null,
  *   soundSignature?: ArrayLike<number> | ArrayLike<[number, number]> | null
  * }} RunOptions

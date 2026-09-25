@@ -9,7 +9,7 @@
 // the very same fits as turboeq.wasm.
 
 import { readFile } from 'node:fs/promises';
-import { TurboEQ } from '../../js/turboeq.js';
+import { EXACT_MATCH_OPTIONS, TurboEQ } from '../../js/turboeq.js';
 
 const bytes = await readFile(new URL('../../zig-out/bin/turboeq.wasm', import.meta.url));
 const module = await WebAssembly.compile(bytes);
@@ -198,6 +198,54 @@ console.log(
 		`bounds held: ${heldIn}  (q 0.1-10 intersected to ${defaults.minQ}-${defaults.maxQ})`
 );
 if (!heldIn) process.exitCode = 1;
+
+// `fit: 'exact'` is shorthand and nothing more: the same run as its options
+// spelled out. The sharpness penalty is the one of them the smoke otherwise
+// never reaches, so dropping it has to change the fit.
+const spelled = eq.run(source, target, {
+	...EXACT_MATCH_OPTIONS,
+	peakingMaxFc: 20000,
+	sampleRate: 48000
+});
+const preset = eq.run(source, target, { fit: 'exact', sampleRate: 48000 });
+const penalized = eq.run(source, target, {
+	...EXACT_MATCH_OPTIONS,
+	sharpnessPenalty: true,
+	peakingMaxFc: 20000,
+	sampleRate: 48000
+});
+const presetSame = JSON.stringify(spelled.filters) === JSON.stringify(preset.filters);
+const penaltyMatters = JSON.stringify(spelled.filters) !== JSON.stringify(penalized.filters);
+console.log(
+	`exact     ${'—'.padStart(6)}     RMSE ${preset.rmse.toFixed(4)}  ` +
+		`preset = spelled out: ${presetSame}  penalty changes the fit: ${penaltyMatters}`
+);
+if (!presetSame || !penaltyMatters) process.exitCode = 1;
+
+// Free shelves fit fc and Q as well as gain, inside their own window.
+const shelfWindow = { minFc: 20, maxFc: 20000, minQ: 0.4, maxQ: 0.7, minGain: -12, maxGain: 12 };
+const freeBank = eq.peakingBank({
+	peaking: 3,
+	shelfPlacement: 'free',
+	limits: profile,
+	shelfLimits: shelfWindow,
+	bounds: 'as-given'
+});
+const free = eq.run(source, target, { banks: [freeBank], fit: 'exact', sampleRate: 48000 });
+const shelvesFree = free.filters.slice(0, 2);
+const shelvesHeld = shelvesFree.every(
+	(f) =>
+		f.fc >= shelfWindow.minFc - 1e-9 &&
+		f.fc <= shelfWindow.maxFc + 1e-9 &&
+		f.q >= shelfWindow.minQ - 1e-9 &&
+		f.q <= shelfWindow.maxQ + 1e-9
+);
+const shelvesMoved = shelvesFree[0].fc !== 105 || shelvesFree[1].fc !== 10000;
+console.log(
+	`free      ${'—'.padStart(6)}     RMSE ${free.rmse.toFixed(4)}  ` +
+		`shelves inside their window: ${shelvesHeld}  moved off 105 Hz / 10 kHz: ${shelvesMoved}`
+);
+if (!shelvesHeld || !shelvesMoved || free.filters.length !== 5) process.exitCode = 1;
 
 // A graphic EQ fits on its own grid rather than being snapped onto it, so
 // every band comes back on the frequency the slider actually has.

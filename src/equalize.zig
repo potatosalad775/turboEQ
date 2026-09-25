@@ -41,6 +41,12 @@ pub const Options = struct {
     treble_f_upper: f64 = 8000.0,
     /// Scales gain in the treble, both directions. 1.0 leaves it alone.
     treble_gain_k: f64 = 1.0,
+    /// The last smoothing pass, over the limited and capped curve, in
+    /// octaves. Upstream hardcodes a fifth of an octave in `equalize`, which
+    /// blurs anything narrower out of what the optimizer fits; zero or less
+    /// skips the pass. Not one of upstream's parameters, so anything but 1/5
+    /// departs from its objective.
+    equalization_window_size: f64 = 1.0 / 5.0,
 };
 
 /// Everything `FrequencyResponse.equalize` returns. The intermediates are
@@ -170,10 +176,14 @@ pub fn equalize(
     // A fifth-octave pass takes the kinks the limiter left out of the curve.
     const equalization = try allocator.alloc(f64, n);
     errdefer allocator.free(equalization);
-    try curve.smoothen(allocator, f, combined, .{
-        .window_size = 1.0 / 5.0,
-        .treble_window_size = 1.0 / 5.0,
-    }, equalization);
+    if (opts.equalization_window_size > 0.0) {
+        try curve.smoothen(allocator, f, combined, .{
+            .window_size = opts.equalization_window_size,
+            .treble_window_size = opts.equalization_window_size,
+        }, equalization);
+    } else {
+        @memcpy(equalization, combined);
+    }
 
     return .{
         .allocator = allocator,

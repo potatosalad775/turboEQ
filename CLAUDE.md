@@ -233,10 +233,22 @@ objective, which is what makes them allowed. BENCHMARKS.md has the evidence.
 - **Shelves stay pinned**, as every shipped preset has them. This one is
   fidelity to upstream's layout, not quality: freeing them, within the
   `DEFAULT_SHELF_FILTER_*` bounds (Q 0.4 to 0.7), lowers the loss on most real
-  curves for 1.5x the time. No fixture reaches the free-shelf `init()` path, so
-  `peq.zig`'s "free shelves place themselves" test is its only cover.
+  curves for 1.5x the time. `peakingBank({ shelfPlacement: 'free' })` is the
+  opt-in. No fixture reaches the free-shelf `init()` path, so `peq.zig`'s "free
+  shelves place themselves" test and the smoke's free-shelf check are its only
+  cover.
 
-**`lossFlattenF` is an opt-in departure from the objective.** Upstream's
+**`lossFlattenF`, `sharpnessPenalty` and `equalizationWindowSize` are opt-in
+departures from the objective**, and `fit: 'exact'` is the binding's name for all of
+them at once (`EXACT_MATCH_OPTIONS`, with `trebleWindowSize` and `maxSlope`, which
+upstream exposes). The preset lives in `js/turboeq.js`, not the ABI: the wasm sees only
+the slots it expands to. `sharpness_penalty` drops `Peaking.sharpness_penalty` from the
+loss and its gradient; `equalization_window_size` is the fifth-octave pass upstream
+hardcodes at the end of `equalize`, 0 skipping it. A free level (the loss blind to a
+constant offset) was tried as a fourth and removed: with two shelves able to lift the
+whole curve for nothing, the fit drifted past `maxGain`.
+
+**`lossFlattenF` in detail.** Upstream's
 `_optimizer_loss` flattens both curves to their mean above 10 kHz, which
 suits rigs that are not trusted up there. `peq.Options.flatten_f` keeps
 10 kHz by default; `Infinity` scores the shape to the top of the grid, for

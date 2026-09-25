@@ -91,10 +91,40 @@ export interface TurboEQOptions {
 	 * measurements trusted past 10 kHz. Departs from upstream's objective.
 	 */
 	lossFlattenF?: number;
+
+	/**
+	 * Add each peaking band's sharpness penalty to the loss, as AutoEq does.
+	 * `false` lets the fit use bands steeper than about 18 dB per octave
+	 * without paying for it. Departs from upstream's objective.
+	 */
+	sharpnessPenalty?: boolean;
+
+	/**
+	 * Octaves of the last smoothing pass over the equalization curve. AutoEq
+	 * hardcodes 1/5; `0` skips the pass. Departs from upstream's objective.
+	 */
+	equalizationWindowSize?: number;
 }
+
+/**
+ * What `fit: 'exact'` stands for. Options passed outright win over these.
+ */
+export declare const EXACT_MATCH_OPTIONS: Readonly<{
+	lossFlattenF: number;
+	trebleWindowSize: number;
+	maxSlope: number;
+	sharpnessPenalty: false;
+	equalizationWindowSize: 0;
+}>;
 
 /** Everything `run` takes: the scalars above, plus the two that are structure. */
 export interface TurboEQRunOptions extends TurboEQOptions {
+	/**
+	 * `'autoeq'`, the default, is AutoEq's objective. `'exact'` fits the curve
+	 * as a graph shows it: `EXACT_MATCH_OPTIONS` underneath whatever else is
+	 * passed, and the built-in bank's peaking bands allowed up to 20 kHz.
+	 */
+	fit?: 'autoeq' | 'exact';
 	/**
 	 * The filter banks to fit, in order, each against what the last one left.
 	 * AutoEq's `PEQ.from_dict` over a list of configs. Says everything the
@@ -203,6 +233,11 @@ export declare class TurboEQ {
 	peakingBank(spec?: {
 		peaking?: number;
 		shelves?: boolean;
+		/**
+		 * `'pinned'` (default) holds the shelves at 105 Hz / 10 kHz, Q 0.7, as
+		 * AutoEq's presets do. `'free'` fits their fc and Q inside `shelfLimits`.
+		 */
+		shelfPlacement?: 'pinned' | 'free';
 		limits?: TurboEQBandLimits;
 		shelfLimits?: TurboEQBandLimits;
 		bounds?: 'intersect' | 'as-given';

@@ -452,6 +452,12 @@ pub const Options = struct {
     /// it. Past the top of the grid, infinity included, nothing is flattened
     /// and every sample up to `max_f` is its own residual.
     flatten_f: f64 = 10000.0,
+    /// Add each peaking filter's sharpness penalty to the loss, as upstream's
+    /// `_optimizer_loss` does. Turning it off departs from the objective:
+    /// nothing then discourages a band steeper than about 18 dB/octave, which
+    /// is what a fit judged against the curve on a graph wants and what a fit
+    /// judged by ear usually does not.
+    sharpness_penalty: bool = true,
 };
 
 /// The first index `squaredLoss` flattens: `argmin(abs(f - 10000))` upstream,
@@ -498,6 +504,8 @@ pub const Peq = struct {
     min_f_ix: usize,
     max_f_ix: usize,
     flat_ix: usize,
+    /// `Options.sharpness_penalty`.
+    sharpness: bool,
 
     /// `4*sin(w/2)^2` for each frequency. Fixed for the life of the fit, so
     /// the magnitude's only transcendental never enters the inner loop.
@@ -545,6 +553,7 @@ pub const Peq = struct {
             .min_f_ix = util.argminAbs(f, opts.min_f),
             .max_f_ix = util.argminAbs(f, opts.max_f),
             .flat_ix = flatIndex(f, opts.flatten_f),
+            .sharpness = opts.sharpness_penalty,
             .phi = phi,
             .fr = try allocator.alloc(f64, f.len),
             .filt_fr = try allocator.alloc(f64, filters.len * f.len),
@@ -673,8 +682,8 @@ pub const Peq = struct {
     /// `_optimizer_loss`. Mean squared error between min_f and max_f, with
     /// both curves flattened to their mean above `Options.flatten_f`, 10 kHz
     /// upstream, because only total energy matters up there, plus each
-    /// filter's sharpness penalty. The
-    /// square root is taken last, exactly as upstream does.
+    /// filter's sharpness penalty unless `Options.sharpness_penalty` is off.
+    /// The square root is taken last, exactly as upstream does.
     ///
     /// `refresh()` must have run for the current parameters.
     pub fn lossFromResponse(self: Peq) f64 {
@@ -706,6 +715,7 @@ pub const Peq = struct {
         }
         var value = sum / @as(f64, @floatFromInt(self.max_f_ix - self.min_f_ix));
 
+        if (!self.sharpness) return value;
         for (self.filters, 0..) |filt, k| {
             const row = self.filt_fr[k * n ..][0..n];
             value += biquad.sharpnessPenalty(filt.kind, filt.q, filt.gain, row);
@@ -789,7 +799,7 @@ pub const Peq = struct {
 
             for (0..rows) |j| {
                 var g = dot_w[j];
-                if (filt.kind == .peaking) {
+                if (self.sharpness and filt.kind == .peaking) {
                     // d/dp mean((fr * coef)^2), both factors varying.
                     g += 2.0 * coef * coef * dot_fr[j] / nf;
                     g += 2.0 * coef * dcoef[@intFromEnum(wrt.slice()[j])] * fr_sq_sum / nf;
@@ -1231,12 +1241,16 @@ test "the loss gradient matches central differences" {
         t.* = 3.0 * @sin(math.log10(fv) * 4.0) - 1.5 * math.log10(fv / 1000.0);
     }
 
-    // Upstream's flattening above 10 kHz, and none at all.
-    for ([_]f64{ 10000.0, math.inf(f64) }) |flatten_f| {
+    // Upstream's flattening above 10 kHz and none at all, each with and
+    // without the sharpness penalty.
+    for ([_]f64{ 10000.0, math.inf(f64), 10000.0, math.inf(f64) }, 0..) |flatten_f, case| {
         const filters = try peakingWithShelvesConfig(allocator, 3);
         defer allocator.free(filters);
 
-        var peq = try Peq.init(allocator, f, 44100.0, filters, target, .{ .flatten_f = flatten_f });
+        var peq = try Peq.init(allocator, f, 44100.0, filters, target, .{
+            .flatten_f = flatten_f,
+            .sharpness_penalty = case < 2,
+        });
         defer peq.deinit();
 
         const params = try allocator.alloc(f64, peq.paramCount());
@@ -1288,6 +1302,41 @@ test "a treble peak reaches the loss only once flattening is off" {
         out.* = peq.lossFromResponse();
     }
     try std.testing.expect(losses[1] > 10.0 * losses[0]);
+}
+
+test "without the sharpness penalty the loss is the error alone" {
+    const allocator = std.testing.allocator;
+    const f = try testGrid(allocator);
+    defer allocator.free(f);
+
+    // A flat target and one steep band, far past 18 dB/octave.
+    const target = try allocator.alloc(f64, f.len);
+    defer allocator.free(target);
+    @memset(target, 0);
+
+    var losses: [2]f64 = undefined;
+    for ([_]bool{ true, false }, &losses) |sharpness, *out| {
+        const filters = try peakingConfig(allocator, 1);
+        defer allocator.free(filters);
+        filters[0].fc = 3000.0;
+        filters[0].q = 10.0;
+        filters[0].gain = 15.0;
+        var peq = try Peq.init(allocator, f, 44100.0, filters, target, .{
+            .flatten_f = math.inf(f64),
+            .sharpness_penalty = sharpness,
+        });
+        defer peq.deinit();
+        peq.refresh();
+        out.* = peq.lossFromResponse();
+
+        if (!sharpness) {
+            var sum: f64 = 0;
+            for (peq.min_f_ix..peq.max_f_ix) |k| sum += peq.fr[k] * peq.fr[k];
+            const mse = sum / @as(f64, @floatFromInt(peq.max_f_ix - peq.min_f_ix));
+            try std.testing.expectApproxEqRel(@sqrt(mse), out.*, 1e-12);
+        }
+    }
+    try std.testing.expect(losses[0] > losses[1]);
 }
 
 test "optimizing lowers the loss and respects the bounds" {

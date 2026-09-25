@@ -21,23 +21,49 @@ All three are deliberate. Treble measurements vary with fit and seating on every
 narrow feature seen at 12 kHz may not be where the listener's ear puts it. AutoEq corrects
 what it can trust.
 
+## Two more things in the objective
+
+Beyond the treble, AutoEq's objective holds a fit back from the curve in two more ways:
+
+4. **A penalty on steep bands.** Every peaking band steeper than about 18 dB per octave adds a
+   penalty to the loss, so the optimizer shies away from narrow, deep bands even where the
+   curve has a narrow, deep feature.
+5. **One last smoothing pass.** After the slope limit, AutoEq smooths the curve the optimizer
+   fits over a fifth of an octave. That setting is hardcoded upstream. Anything narrower than
+   a fifth of an octave is blurred out of the target before the fit starts.
+
+On measurements whose treble is a row of narrow peaks and notches, these two are what keep a
+fit from reaching the treble at all.
+
 ## Turning it off
 
-If you trust your measurement to 20 kHz, for example from a B&K 5128, or you want a fit
-that matches the graph you are looking at, turn all three off and let bands reach the top
-of the range:
+If you trust your measurement to 20 kHz, for example from a B&K 5128, or you want a fit that
+matches the graph you are looking at, ask for an exact match:
+
+```js
+eq.run(source, target, { fit: 'exact' });
+```
+
+That is `EXACT_MATCH_OPTIONS` underneath whatever else you pass, and, with the built-in bank,
+peaking bands allowed up to 20 kHz:
 
 ```js
 eq.run(source, target, {
 	lossFlattenF: Infinity, // score the treble's shape, not only its mean
 	trebleWindowSize: 1 / 12, // the same smoothing as the rest of the curve
 	maxSlope: Infinity, // no slope limit
+	sharpnessPenalty: false, // no penalty on steep bands
+	equalizationWindowSize: 0, // no last smoothing pass
 	peakingMaxFc: 20000
 });
 ```
 
-Of these, only `lossFlattenF` changes AutoEq's objective. The other three are parameters
-AutoEq itself exposes. [Fidelity](fidelity.md) has more on that distinction.
+An option you pass yourself wins over the preset's. With `banks`, the bounds in your banks say
+where bands may sit, so set their `maxFc` yourself; `peakingBank` needs `bounds: 'as-given'`
+to go past AutoEq's 10 kHz.
+
+`trebleWindowSize` and `maxSlope` are parameters AutoEq itself exposes. The other three change
+AutoEq's objective. [Fidelity](fidelity.md) has more on that distinction.
 
 ## The boost cap still applies
 
@@ -48,8 +74,8 @@ and it gives up preamp headroom. Raise it with care.
 
 ## Limits on the smoothing window
 
-A window narrower than 1/12 octave buys nothing, since no band is sharper than Q 6. A window
-narrower than about 1/46 octave, or wider than the whole curve, is refused.
+A `windowSize` or `trebleWindowSize` narrower than about 1/46 octave, or wider than the whole
+curve, is refused. `equalizationWindowSize` takes 0 to skip its pass.
 
 ## Do not raise `peakingMaxFc` on its own
 

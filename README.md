@@ -66,6 +66,7 @@ The common ones:
 | `peakingMinFc` … `peakingMaxGain` | AutoEq's  | Bounds on every peaking band                                    |
 | `lossMinF`, `lossMaxF`            | 20, 20000 | The band the error is scored over                               |
 | `lossFlattenF`                    | 10000     | Above this only mean level is scored; `Infinity` scores shape   |
+| `fit`                             | `autoeq`  | `'exact'` fits the curve's shape to 20 kHz, CrinGraph-style     |
 
 **`peaking` counts peaking bands only.** `shelves: true` adds two more filters on top, so
 the default returns ten. That is how AutoEq names `N_PEAKING_WITH_SHELVES`.
@@ -75,8 +76,9 @@ the default returns ten. That is how AutoEq names `N_PEAKING_WITH_SHELVES`.
 - **[Custom filters](docs/custom-filters.md)**: fit to a device's band count and ranges,
   a graphic EQ, or exactly the filters you list; export EqualizerAPO text; serve the wasm
   yourself.
-- **[Exact match](docs/exact-match.md)**: turn off AutoEq's treble caution and fit the
-  curve's shape to 20 kHz, CrinGraph-style.
+- **[Exact match](docs/exact-match.md)**: `fit: 'exact'` turns off AutoEq's treble caution
+  and the rest of what keeps a fit from following the curve, and fits its shape to 20 kHz,
+  CrinGraph-style.
 - **[Fidelity](docs/fidelity.md)**: what is ported from AutoEq, which upstream quirks come
   along, how parity is checked, and the few places turboEQ departs on purpose.
 - **[Contributing](CONTRIBUTING.md)**: building, tests, the parity harness and benchmarks.
