@@ -1,7 +1,7 @@
 # turboEQ
 
-[AutoEq](https://github.com/jaakkopasanen/AutoEq)'s parametric EQ optimizer, ported to Zig
-and compiled to WebAssembly.
+[AutoEq](https://github.com/jaakkopasanen/AutoEq)'s idea of a good parametric EQ, found by a
+faster optimizer, in Zig and compiled to WebAssembly.
 
 Hand it a measured frequency response and a target curve, get back a parametric EQ — in
 milliseconds, in the browser. [Try the demo](https://potatosalad775.github.io/turboEQ/).
@@ -9,7 +9,7 @@ milliseconds, in the browser. [Try the demo](https://potatosalad775.github.io/tu
 ## Why
 
 AutoEq is the reference for automatic headphone EQ, but it is a Python program: it runs on a
-server or a desktop, not in a web page. turboEQ runs the same optimizer client-side, fast
+server or a desktop, not in a web page. turboEQ fits to the same objective client-side, fast
 enough to re-fit on every slider move rather than behind a spinner.
 
 - **An 80 KB wasm module with no imports.** No Python, no scipy, no server round trip. It
@@ -18,9 +18,10 @@ enough to re-fit on every slider move rather than behind a spinner.
   loss evaluations per iteration; turboEQ computes them exactly. That, more than Zig
   against Python, makes the fit **23x to 190x faster** than upstream at equal quality, 92x
   at the median.
-- **AutoEq's answer, not an approximation.** Every stage that decides what a good fit means
-  is ported and checked against recorded upstream output. See
-  [how faithful, and where it differs](docs/fidelity.md).
+- **AutoEq's objective, turboEQ's own optimizer.** Every stage that decides what a good fit
+  means is ported and checked against recorded upstream output. The search for that fit is
+  turboEQ's, and is checked against the loss AutoEq reaches on the same input. See
+  [what is AutoEq's and what is not](docs/fidelity.md).
 
 On 1,310 real headphone and IEM measurements, a ten-filter fit through the wasm takes 12 ms
 at the median and 103 ms at worst, or 15 ms and 133 ms on an engine without WebAssembly
@@ -82,7 +83,7 @@ the default returns ten. That is how AutoEq names `N_PEAKING_WITH_SHELVES`.
   and the rest of what keeps a fit from following the curve, and fits its shape to 20 kHz,
   CrinGraph-style.
 - **[Fidelity](docs/fidelity.md)**: what is ported from AutoEq, which upstream quirks come
-  along, how parity is checked, and the few places turboEQ departs on purpose.
+  along, how parity is checked, and how turboEQ's own optimizer searches.
 - **[Contributing](CONTRIBUTING.md)**: building, tests, the parity harness and benchmarks.
 
 ## Using it from Zig

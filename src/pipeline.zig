@@ -111,10 +111,10 @@ pub const Config = struct {
     /// leaves such a ramp to a shelf, so a run with no shelf for an end
     /// strands it; an end that any bank has a shelf for is left to the shelf
     /// and fitted once. On by default, as a starting layout and not a change
-    /// to the objective. This flag decides it for the run, not
-    /// `optimizer.seed_edges`, which `run` overwrites. BENCHMARKS.md has what
-    /// it buys.
-    seed_edges: bool = true,
+    /// to the objective. `seedEdges` in the binding. `run` works out which
+    /// ends are open and sets `optimizer.seed_edges` for each fit itself, so
+    /// a value given there is not read. BENCHMARKS.md has what it buys.
+    second_start: bool = true,
     stop: peq.StopRules = .{},
 };
 
@@ -339,7 +339,7 @@ pub fn run(
     // not bank by bank: each half of upstream's CLI cascade lacks one shelf,
     // and seeding the end the other half's shelf is there for costs half
     // again the time and moves nothing.
-    var edges: peq.EdgeSeeds = .{ .low = cfg.seed_edges, .high = cfg.seed_edges };
+    var edges: peq.EdgeSeeds = .{ .low = cfg.second_start, .high = cfg.second_start };
     for (banks) |bank| for (bank.filters) |filt| switch (filt.kind) {
         .low_shelf => edges.low = false,
         .high_shelf => edges.high = false,
@@ -382,7 +382,7 @@ pub fn run(
         const bounds = try allocator.alloc(peq.Bound, params.len);
         defer allocator.free(bounds);
 
-        // Upstream's start first. With `seed_edges`, a second start that may
+        // Upstream's start first. With `second_start`, one that may
         // put a band on an end ramp is fitted too wherever it differs, and the
         // lower loss is kept, so the option can only match or beat upstream's
         // layout by the fit's own measure.
@@ -841,7 +841,7 @@ test "a run with no shelf still gets a band onto a ramp at the end of the curve"
     var plain = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, .{
         .peaking = 4,
         .shelves = false,
-        .seed_edges = false,
+        .second_start = false,
     });
     defer plain.deinit();
     var seeded = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, .{
@@ -878,7 +878,7 @@ test "a shelf anywhere in the run keeps its end to itself, and the fit to one st
         .{ .banks = &graphic },
     }) |base| {
         var off = base;
-        off.seed_edges = false;
+        off.second_start = false;
         var a = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, base);
         defer a.deinit();
         var b = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, off);

@@ -1,7 +1,7 @@
 {
 	"name": "@potatosalad775/turboeq",
 	"version": "0.2.0",
-	"description": "AutoEq's parametric EQ optimizer, ported to Zig and compiled to WebAssembly",
+	"description": "AutoEq's parametric EQ objective with a faster optimizer, in Zig and WebAssembly",
 	"keywords": [
 		"autoeq",
 		"equalizer",

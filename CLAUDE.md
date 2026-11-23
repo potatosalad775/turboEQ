@@ -1,7 +1,9 @@
 # turboEQ
 
-A Zig port of [AutoEq](https://github.com/jaakkopasanen/AutoEq)'s parametric EQ
-optimizer, compiled to WebAssembly so it runs client-side in a browser.
+[AutoEq](https://github.com/jaakkopasanen/AutoEq)'s parametric EQ objective,
+ported to Zig and fitted by turboEQ's own optimizer, compiled to WebAssembly so
+it runs client-side in a browser. It began as a port of the whole optimizer and
+is no longer described as one: see "The line" below.
 `README.md` is the user-facing description, with depth in `docs/` (fidelity,
 custom filters, exact match) and the human contributor guide in
 `CONTRIBUTING.md`; this file is for working on it. When a fact here changes
@@ -49,6 +51,17 @@ stays pinned to recorded upstream output. Everything about _how a caller asks
 for a fit_ and _what they do with the answer_ is turboEQ's own: the JavaScript
 binding, the wasm ABI, the EqualizerAPO formatters.
 
+**The search is turboEQ's own as well, and is judged by outcome.** The solver,
+its stopping rule and its starting points are not upstream's and are not meant
+to be. A change to the search is an improvement to make and measure, not a
+departure to excuse: it has to leave the objective alone, never end above the
+fit it replaces by the fit's own loss, and pay for its time over the soak. The
+bar against upstream is the loss upstream reaches on the same optimizer
+inputs, on the fixtures and over `tools/parity/survey_upstream.py`. A momentum
+warm-up before L-BFGS was tried on those terms and dropped: beside the plain
+fit it never lost and cost 2x for 0.01 dB of median RMSE; in place of it, it
+was a coin flip.
+
 That line sorts the work. Per-filter configuration looks like a turboEQ
 extension and is actually `PEQ.from_dict`, so it is ported rather than
 invented. EqAPO export has no upstream objective behind it, so it lives
@@ -56,7 +69,7 @@ outside the core.
 
 **turboEQ owns the whole pipeline** and works as a drop-in replacement for
 AutoEq, so it never _requires_ a caller to do work upstream of it. Anything
-that departs from upstream — skipping preparation a caller has already done,
+that departs from upstream's objective or its preparation — skipping preparation a caller has already done,
 a constraint upstream has no equivalent for — goes behind an explicit opt-in,
 with the faithful path as the default and the default path fixture-covered.
 
@@ -218,10 +231,10 @@ full — rather than exporting it or writing a copy by hand.
   lane-dependent algorithm, and no vector reduction the scalar build would
   order differently.
 
-## Defaults that differ from upstream
+## The search, where it differs from upstream's
 
 Each is a _stopping rule or a starting layout_, never a change to the
-objective, which is what makes them allowed. BENCHMARKS.md has the evidence.
+objective. BENCHMARKS.md has the evidence.
 
 - **Early stopping is off.** Upstream's `min_std` stops on a plateau, within
   a few percent of the work, and costs quality on every real fit measured;
@@ -238,7 +251,7 @@ objective, which is what makes them allowed. BENCHMARKS.md has the evidence.
   shelves place themselves" test and the smoke's free-shelf check are its only
   cover.
 - **A second start where no shelf has the end** (`seedEdges`,
-  `pipeline.Config.seed_edges`). `find_peaks` never reports an end sample, and
+  `pipeline.Config.second_start`). `find_peaks` never reports an end sample, and
   a peak a sample or two in from an end has its base search cut off there, so
   `Peaking.init` has nothing to seed on a ramp that tops out at 20 Hz or
   20 kHz. Upstream's presets leave that to a shelf; a run without one strands

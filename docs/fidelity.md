@@ -1,20 +1,25 @@
 # Fidelity to AutoEq
 
-turboEQ aims at AutoEq's answer, not an approximation of it. This page covers what is
-ported, how that is checked, and the few places turboEQ departs from upstream on purpose.
+turboEQ takes AutoEq's definition of a good fit and looks for that fit with an optimizer of
+its own. This page covers what is ported, how that is checked, and how the search differs
+from upstream's.
 
-## The line
+## Three parts
 
-Everything that decides what a _good fit_ means is AutoEq's: the perceptual stage, the loss,
-the penalties, the grids, the filter `init()` heuristics. It is ported, and checked against
-recorded upstream output.
+**What a good fit means is AutoEq's.** The perceptual stage, the loss, the penalties, the
+grids and the filter `init()` heuristics are ported, and checked against recorded upstream
+output. Anything that changes what a fit optimizes is opt-in.
 
-Everything about _how you ask for a fit_ and _what you do with the answer_ is turboEQ's
-own: the JavaScript binding, the wasm interface, the EqualizerAPO formatter.
+**How the fit is found is turboEQ's.** The solver, when it stops and where it starts from
+are its own, and are judged by the result: the loss reached on the same input, against the
+loss AutoEq reaches. A turboEQ fit will not have AutoEq's filter parameters. It is meant to
+score as well or better by AutoEq's own measure.
+
+**How you ask and what you get back is turboEQ's too**: the JavaScript binding, the wasm
+interface, the EqualizerAPO formatter.
 
 turboEQ works as a drop-in replacement for AutoEq's optimizer, so it never _requires_ you
-to do work upstream of it. Anything that changes what a fit optimizes is opt-in. The
-default path is the faithful one.
+to do work upstream of it.
 
 ## What is ported
 
@@ -65,9 +70,9 @@ treble, heavy bass and a bass roll-off. The Zig port is diffed against all of th
 CI runs the comparison on every push. [tools/parity/README.md](../tools/parity/README.md)
 has the tolerances per stage and the reasons behind them.
 
-## Where it differs, on purpose
+## The search
 
-These differences change how the fit is _searched_, never what it _optimizes_.
+All of this is how the fit is _searched for_, never what it _optimizes_.
 
 **The solver.** Upstream calls `fmin_slsqp` with bounds and no other constraints, so a
 projected L-BFGS solves the same problem. turboEQ also computes gradients analytically,

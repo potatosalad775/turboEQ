@@ -277,7 +277,7 @@ fn configFrom(opts: []const f64) pipeline.Config {
     if (cfg.optimizer.min_f > cfg.optimizer.max_f) {
         std.mem.swap(f64, &cfg.optimizer.min_f, &cfg.optimizer.max_f);
     }
-    cfg.seed_edges = optFlag(opts, .seed_edges, defaults.seed_edges);
+    cfg.second_start = optFlag(opts, .seed_edges, defaults.second_start);
 
     cfg.peaking_limits = limitsFrom(opts, defaults.peaking_limits, .peaking_min_fc);
     cfg.shelf_limits = limitsFrom(opts, defaults.shelf_limits, .shelf_min_fc);
