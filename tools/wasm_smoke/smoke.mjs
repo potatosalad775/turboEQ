@@ -287,13 +287,14 @@ if (!refused) {
 	process.exitCode = 1;
 }
 
-// `seedEdges` fits from a second start that may put a band on a ramp topping
-// out at 20 Hz or 20 kHz, and keeps the lower loss. Three things have to hold
-// on real curves: it never loses to upstream's start, it changes nothing where
-// the bank has both shelves, and on the two curves whose bass is such a ramp
-// a peaking-only fit gets a band down there. Upstream's start leaves
-// `bass_ramp_iem` with 6 to 7 dB uncorrected below 40 Hz, its lowest band
-// near 300 Hz.
+// A fit also runs from a second start, one that may put a band on a ramp
+// topping out at 20 Hz or 20 kHz, and keeps the lower loss; `seedEdges: false`
+// is upstream's start alone. Three things have to hold on real curves: the
+// default never loses to upstream's start, it is the same fit after the same
+// work wherever a shelf has the end or no band can move, and on the two curves
+// whose bass is such a ramp a peaking-only fit gets a band down there.
+// Upstream's start leaves `bass_ramp_iem` with 6 to 7 dB uncorrected below
+// 40 Hz, its lowest band near 300 Hz.
 const real = async (name) =>
 	(await readFile(new URL(`../parity/real/${name}`, import.meta.url), 'utf8'))
 		.split(/\r?\n/)
@@ -318,27 +319,31 @@ for (const curve of Object.values(realCurves)) {
 		for (const peakingBands of [5, 10]) {
 			const ask = { fit, peaking: peakingBands, shelves: false };
 			const plain = eq.run(curve, target, { ...ask, seedEdges: false });
-			const seeded = eq.run(curve, target, { ...ask, seedEdges: true });
+			const seeded = eq.run(curve, target, ask);
 			seedRuns += 1;
 			if (seeded.loss > plain.loss) seedLost += 1;
 		}
 	}
 }
-const shelved = { peaking: 8, shelves: true };
-const shelvedSame =
-	JSON.stringify(eq.run(realCurves.bass_ramp_iem, target, { ...shelved, seedEdges: true })) ===
-	JSON.stringify(eq.run(realCurves.bass_ramp_iem, target, { ...shelved, seedEdges: false }));
-// Exact match seeds without being asked; AutoEq's objective only when told to.
+// One start, and so the same result down to the evaluation count: the
+// built-in bank with both shelves, the CLI cascade whose halves have one shelf
+// each, and a graphic EQ, which has no shelf and no band free to move.
+const oneStart = [
+	{ peaking: 8, shelves: true },
+	{ banks: cliDefault },
+	{ banks: [eq.graphicBank(sliders, { minGain: -12, maxGain: 12 })] }
+].every(
+	(ask) =>
+		JSON.stringify(eq.run(realCurves.bass_ramp_iem, target, ask)) ===
+		JSON.stringify(eq.run(realCurves.bass_ramp_iem, target, { ...ask, seedEdges: false }))
+);
+// Under AutoEq's objective and under exact match alike.
 const ramp = eq.run(realCurves.bass_ramp_iem, target, {
 	fit: 'exact',
 	peaking: 10,
 	shelves: false
 });
-const rampAutoEq = eq.run(realCurves.bass_ramp_iem, target, {
-	peaking: 10,
-	shelves: false,
-	seedEdges: true
-});
+const rampAutoEq = eq.run(realCurves.bass_ramp_iem, target, { peaking: 10, shelves: false });
 // The other direction, a boost: an open-back's roll-off against Harman's
 // over-ear target, which wants more than the default 6 dB cap leaves room
 // for. Upstream's start puts its lowest band above 1 kHz here.
@@ -352,10 +357,10 @@ const rampReached = lowestFc(ramp) < 60 && ramp.rmse < 0.5 && lowestFc(rampAutoE
 const rolloffReached = lowestFc(rolloff) < 60 && rolloff.rmse < 2;
 console.log(
 	`edges     ${'—'.padStart(6)}     RMSE ${ramp.rmse.toFixed(4)}  ` +
-		`never worse: ${seedRuns - seedLost}/${seedRuns}  shelved fit unchanged: ${shelvedSame}  ` +
+		`never worse: ${seedRuns - seedLost}/${seedRuns}  fitted once where no end is open: ${oneStart}  ` +
 		`ramp reached: ${rampReached}  roll-off reached: ${rolloffReached}`
 );
-if (seedLost || !shelvedSame || !rampReached || !rolloffReached) process.exitCode = 1;
+if (seedLost || !oneStart || !rampReached || !rolloffReached) process.exitCode = 1;
 
 // The SIMD build does the same arithmetic in the same order, so its fits are
 // bit-identical, not merely close. Anything less means the two builds would
@@ -373,7 +378,8 @@ if (TurboEQ.supportsSimd()) {
 		...[1, 3, 6, 8, 12, 20].map((peaking) => ({ peaking, shelves: true })),
 		{ banks: qudelix },
 		{ banks: cliDefault },
-		{ peaking: 10, shelves: false, seedEdges: true },
+		{ peaking: 10, shelves: false },
+		{ peaking: 10, shelves: false, seedEdges: false },
 		{ fit: 'exact', peaking: 10, shelves: false }
 	];
 	const differ = cases.filter((options) => {

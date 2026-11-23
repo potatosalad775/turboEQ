@@ -489,7 +489,7 @@ test "the right-to-left concha allowance sits at 8 to 11.5 kHz" {
     // peak at index 34 into the window is a rise on the right-to-left walk.
     var x: [41]f64 = undefined;
     for (&x, 0..) |*v, i| v.* = 20.0 * math.pow(f64, 2.0, @as(f64, @floatFromInt(i)) / 4.0);
-    var y = [_]f64{0} ** 41;
+    var y: [41]f64 = @splat(0);
     y[34] = 12;
     y[35] = 6;
     const peak_inds = [_]usize{34};

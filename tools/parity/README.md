@@ -40,7 +40,7 @@ python tools/parity/dump_fixtures.py --only real_deep_dip     # one case, the re
 python tools/parity/dump_fixtures.py --fs 44100 --out fixtures-44k1
 ```
 
-Writes `fixtures/`, roughly 3.4 MB across eight cases plus `shared.json`.
+Writes `fixtures/`, roughly 3.8 MB across nine cases plus `shared.json`.
 Commit them. They are the contract, and they must not drift silently.
 
 Regenerate **only** when the upstream pin in `CLAUDE.md` moves, and bump the
@@ -76,9 +76,11 @@ Five synthetic, from `curves.py`: smooth and bumpy sources on a 1/48-octave
 grid, one against a Harman-ish target, one with a deliberate 11.9 dB narrow
 dip, one on a coarse 1/12-octave grid.
 
-Three real, from `real/`: the roughest treble, the deepest narrow null and
-the largest bass tilt in a production measurement set, two of them against a
-real target on its own axis. See `real/README.md` for why those three. They
+Four real, from `real/`: the roughest treble, the deepest narrow null and
+the largest bass tilt in a production measurement set, and an open-back's
+bass roll-off, three of them against a real target on its own axis. See
+`real/README.md` for why those four, and for the fifth curve there that is
+not a case. They
 exist because synthetic curves are smooth in ways real ones are not, and the
 branchy parts of the pipeline — peak and dip detection, the protection mask,
 the slope limiter — decide on structure a generated curve lacks.
@@ -100,7 +102,7 @@ it is how you check the comparator after editing it.
 ## Timing against upstream
 
 ```sh
-zig build bench-fit -Doptimize=ReleaseFast -- --csv 2> turboeq_fit.csv
+zig build bench-fit -Doptimize=fast -- --csv 2> turboeq_fit.csv
 python tools/parity/time_upstream.py --turboeq turboeq_fit.csv
 ```
 
@@ -110,6 +112,20 @@ inputs. `time_upstream.py` times `PEQ.from_dict` plus `PEQ.optimize`;
 `tools/bench/fit.zig` times the same span in turboEQ, stopping at the loss the
 fixture recorded. Needs the AutoEq checkout, like regeneration.
 BENCHMARKS.md has the result.
+
+## Surveying real measurements
+
+```sh
+python tools/parity/survey_upstream.py --target TARGET --out survey MEASUREMENTS_DIR
+zig build bench-fit -Doptimize=fast -- --reps 1 --csv --fixtures survey 2> survey.csv
+python tools/parity/survey_upstream.py --summarize survey.csv
+```
+
+Nine cases cannot say how often turboEQ's fit ends above upstream's on real curves.
+`survey_upstream.py` runs upstream over a directory of measurements and writes what
+`bench-fit` needs to fit the same optimizer inputs, then counts. Its output is not a set of
+fixtures and is not committed: upstream's minima move with the BLAS underneath, so the
+counts describe one machine. BENCHMARKS.md records one such survey.
 
 ## Candidate JSON schema
 

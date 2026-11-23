@@ -13,10 +13,27 @@ do; absolute milliseconds do not. Re-measure rather than trust.
 | Zig     | 0.16.0                             |
 | Node    | v24.18.1                           |
 
-Everything below was measured on that date, against the build in this
-commit. "SIMD" is `turboeq-simd.wasm`, which `TurboEQ.load()` picks wherever
-the engine supports it; "plain" is `turboeq.wasm`, the fallback. The two
-return bit-identical fits, so they differ only in time.
+Everything below was measured on that date, against the build of that date,
+except the sections that carry a date of their own. "SIMD" is
+`turboeq-simd.wasm`, which `TurboEQ.load()` picks wherever the engine supports
+it; "plain" is `turboeq.wasm`, the fallback. The two return bit-identical
+fits, so they differ only in time.
+
+**The project has since moved to Zig 0.17.1**, on 2026-11-23, and the dated
+sections were measured with it. The compiler changed nothing a fit can see:
+over 107 IEMs, the 0.16.0 and 0.17.1 builds of one source returned the same
+loss, RMSE and evaluation count on all 749 fits compared (8, 12, 16 and 20
+bands with shelves; 5, 8 and 10 without), and `candidate.json` came out
+byte for byte the same. Time moved by a few percent in either direction, 0.94
+to 1.04 of 0.16.0's by layout. So the
+undated sections' losses and counts stand, and their times are as good as
+they were.
+
+```sh
+node tools/soak/soak.mjs ... --wasm ZIG_0_16.wasm --tsv a.tsv DIR
+node tools/soak/soak.mjs ... --wasm ZIG_0_17.wasm --tsv b.tsv DIR
+node tools/soak/compare.mjs a.tsv b.tsv      # every loss ratio 1.0000, no fit better or worse
+```
 
 ---
 
@@ -68,15 +85,16 @@ median with SIMD and 15 ms without, across all 1,310.
 ## Against upstream AutoEq
 
 ```sh
-zig build bench-fit -Doptimize=ReleaseFast -- --csv 2> turboeq_fit.csv
+zig build bench-fit -Doptimize=fast -- --csv 2> turboeq_fit.csv
 python tools/parity/time_upstream.py --turboeq turboeq_fit.csv   # needs AutoEq/
 ```
 
 Fit only, on every parity fixture's recorded optimizer grid and target: build
 the filters, run `init()`, fit. The perceptual stage is the same code on both
 sides and is left out. Upstream is AutoEq v4.1.2 under Python 3.14.7, numpy
-2.5.3, scipy 1.18.1; turboEQ is native ReleaseFast. Median of 5 runs upstream,
-9 for turboEQ.
+2.5.3, scipy 1.18.1; turboEQ is native `fast` (ReleaseFast, as Zig 0.16
+called it). Median of 5 runs upstream, 9 for turboEQ. The table predates the
+ninth parity case, `real_bass_rolloff`, which the commands above now time too.
 
 `turboEQ` is the time to reach the loss upstream recorded in the fixture, so
 the two are compared at equal quality. `*` marks rows where upstream found a
@@ -120,6 +138,38 @@ Running to convergence costs 3x to 75x more than stopping at upstream's loss,
 and is still faster than upstream in every row while landing lower in every
 row — at `gentle_vs_flat` with 8 peaking bands and shelves, 0.0494
 against upstream's 0.1566.
+
+### Loss against upstream on real measurements (2026-11-23)
+
+```sh
+python tools/parity/survey_upstream.py --target tools/parity/real/target_harman_ie_2019v2.txt \
+    --every 5 --out survey IEM_DIR                               # needs AutoEq/
+zig build bench-fit -Doptimize=fast -- --reps 1 --csv --fixtures survey 2> survey.csv
+python tools/parity/survey_upstream.py --summarize survey.csv
+# again with --second-start after --reps 1
+```
+
+The fixtures are nine cases. This is the same comparison, converged loss
+against the loss upstream reached on the same optimizer inputs, over every
+fifth of the 1,190 IEMs below: 238 curves, Harman IE 2019v2. Upstream is
+AutoEq v4.1.2 under Python 3.15.2, numpy 2.5.5, scipy 1.18.1. The ratio is
+turboEQ's loss over upstream's, so below 1 is a better fit.
+
+| Config                   | Start             | Ratio, median | p90   | max   | Above upstream | by >10% |
+| ------------------------ | ----------------- | ------------- | ----- | ----- | -------------- | ------- |
+| `4_PEAKING_WITH_SHELVES` | upstream's        | 0.967         | 0.993 | 1.00  | 0              | 0       |
+| `8_PEAKING_WITH_SHELVES` | upstream's        | 0.736         | 0.926 | 0.99  | 0              | 0       |
+| `10_PEAKING`             | upstream's        | 0.591         | 0.996 | 13.31 | 15             | 13      |
+| `10_PEAKING`             | the better of two | 0.343         | 0.964 | 10.40 | 10             | 10      |
+
+With shelves, turboEQ did not end above upstream once. Without them it did on
+15 of 238 from upstream's start, by up to 13x, and the second start below
+brings that to 10 and takes the median from 0.59 of upstream's loss to 0.34.
+The second start changes nothing in the shelved rows, which is the point of
+its gate. The ten left over are ordinary local minima: ten free peaking bands
+with nothing pinned have many, and neither solver finds the best of them
+every time. `tools/parity/real/README.md` has one shelved curve, against a
+flat target, where turboEQ loses to upstream as well.
 
 ---
 
@@ -181,6 +231,75 @@ Freeing the shelves fits better: 713 of the 1,154 by more than 1% in loss,
 preset upstream ships does. A caller who wants them free writes the bank out,
 as `tools/soak/banks/free-shelves.json` does.
 
+### A second start where no shelf has the end (2026-11-23)
+
+```sh
+node tools/soak/soak.mjs --target IEM_TARGET --peaking 5,8,10 --no-shelves \
+    --options '{"seedEdges":false}' --tsv plain.tsv IEM_DIR
+node tools/soak/soak.mjs --target IEM_TARGET --peaking 5,8,10 --no-shelves --tsv both.tsv IEM_DIR
+node tools/soak/compare.mjs plain.tsv both.tsv
+```
+
+`seedEdges`, on by default. The same deployment as above, which has grown to
+1,190 IEMs; 156 headphones as before. SIMD build, Zig 0.17.1, no shelves, so
+`peaking` bands and nothing else. "Upstream's" is `seedEdges: false`, one fit
+from AutoEq's `init()`; "both" fits from that start and from the seeded one
+and keeps the lower loss.
+
+**IEMs, 1,190, AutoEq's objective**
+
+| Peaking | RMSE median, upstream's | both      | p50, upstream's | both    | Loss better >1% | worse |
+| ------- | ----------------------- | --------- | --------------- | ------- | --------------- | ----- |
+| 5       | 1.071                   | **0.910** | 2.2 ms          | 4.5 ms  | 468             | 0     |
+| 8       | 0.742                   | **0.623** | 10.7 ms         | 22.1 ms | 619             | 0     |
+| 10      | 0.652                   | **0.560** | 25.6 ms         | 53.4 ms | 621             | 0     |
+
+**Headphones, 156, AutoEq's objective**
+
+| Peaking | RMSE median, upstream's | both      | p50, upstream's | both    | Loss better >1% | worse |
+| ------- | ----------------------- | --------- | --------------- | ------- | --------------- | ----- |
+| 5       | 1.831                   | **1.696** | 1.9 ms          | 3.4 ms  | 52              | 0     |
+| 8       | 1.234                   | **1.089** | 7.2 ms          | 14.8 ms | 63              | 0     |
+| 10      | 1.033                   | **1.003** | 16.5 ms         | 30.2 ms | 83              | 0     |
+
+**IEMs, 1,190, `fit: 'exact'`**
+
+| Peaking | RMSE median, upstream's | both      | p50, upstream's | both    | Loss better >1% | worse |
+| ------- | ----------------------- | --------- | --------------- | ------- | --------------- | ----- |
+| 5       | 1.710                   | **1.614** | 1.9 ms          | 3.6 ms  | 375             | 0     |
+| 8       | 1.335                   | **1.228** | 7.2 ms          | 14.7 ms | 465             | 0     |
+| 10      | 1.200                   | **1.095** | 15.0 ms         | 30.6 ms | 476             | 0     |
+
+A third to a half of peaking-only fits end more than 1% lower in loss, the
+8- and 10-band IEM fits at the tenth percentile at a fifth of the loss, for
+1.8x to 2.0x the time. No fit of the 7,608 ended higher: the better of two
+starts cannot lose to the first. A ramp at the end of the curve is not an
+edge case against a Harman target, whose bass shelf leaves one on most
+earphones.
+
+The loss is not the RMSE under AutoEq's objective, which penalizes steep
+bands and scores only the mean above 10 kHz. So a lower loss came with an RMSE
+more than 0.1 dB higher on 9, 33 and 60 of the 1,190 IEM fits at 5, 8 and 10
+bands, by 0.73 dB at most, against 296, 335 and 311 that came out more than
+0.1 dB lower, by up to 4.35 dB. Under exact match, where the two nearly
+coincide, no RMSE rose by more than 0.04 dB.
+
+**The gate is per run.** An end is seeded only if no bank of the run has a
+shelf for it, and only bands free to move are. With the gate per bank, as it
+first was, each half of AutoEq's CLI cascade was seeded at the end the other
+half's shelf is there for. Measured on the build before the gate changed:
+
+| CLI cascade, 1,190 IEMs | RMSE median | Time  |
+| ----------------------- | ----------- | ----- |
+| One start per bank      | 0.423       | 1.00x |
+| Seeded bank by bank     | 0.413       | 1.62x |
+
+That is 0.01 dB for 1.6x, with 8 fits more than 0.1 dB worse in RMSE beside
+20 better. Per run, the cascade, the default `8_PEAKING_WITH_SHELVES` and a
+graphic EQ are fitted once: the 1,190 cascade fits and the 1,190 default fits
+return the same filters after the same number of evaluations as with
+`seedEdges: false`.
+
 ---
 
 ## Before and after the fit-cost work
@@ -222,21 +341,24 @@ curves and never over three.
 ## wasm module
 
 ```sh
-zig build wasm                                # ReleaseSmall, the default
-zig build wasm -Dwasm-optimize=ReleaseFast
+zig build wasm                         # the small mode, the default
+zig build wasm -Dwasm-optimize=fast
 ```
 
-| Build                                       | raw       | gzip -9  |
-| ------------------------------------------- | --------- | -------- |
-| ReleaseSmall, `turboeq.wasm` (shipped)      | 79,489 B  | 35,916 B |
-| ReleaseSmall, `turboeq-simd.wasm` (shipped) | 80,129 B  | 37,113 B |
-| ReleaseFast, `turboeq.wasm`                 | 118,757 B | 44,022 B |
-| ReleaseFast, `turboeq-simd.wasm`            | 115,704 B | 43,702 B |
+Sizes as of 2026-11-23, Zig 0.17.1, which calls the modes `small` and `fast`
+where 0.16 had ReleaseSmall and ReleaseFast.
+
+| Build                                  | raw       | gzip -9  |
+| -------------------------------------- | --------- | -------- |
+| `small`, `turboeq.wasm` (shipped)      | 83,382 B  | 38,015 B |
+| `small`, `turboeq-simd.wasm` (shipped) | 83,365 B  | 38,407 B |
+| `fast`, `turboeq.wasm`                 | 123,927 B | 46,554 B |
+| `fast`, `turboeq-simd.wasm`            | 119,989 B | 45,413 B |
 
 A browser fetches one of the two shipped builds. Over the 1,154 IEMs at 8
-and 12 bands, ReleaseFast was 2% to 3% faster than ReleaseSmall in either
-build and returned the same fits to the bit. Half again the module for 3% is
-why ReleaseSmall is the default.
+and 12 bands, measured with 0.16.0, `fast` was 2% to 3% faster than `small`
+in either build and returned the same fits to the bit. Half again the module
+for 3% is why `small` is the default.
 
 ---
 
@@ -267,6 +389,6 @@ written. `teq_heap_used` includes what a bump allocator cannot reclaim.
 zig build test && zig build dump && python tools/parity/compare.py candidate.json
 ```
 
-412 pass, 36 better, 0 fail, 0 skip, over eight cases — five synthetic, three
+451 pass, 39 better, 0 fail, 0 skip, over nine cases — five synthetic, four
 real measurements. `BETTER` means a lower loss than upstream reached, which
 invariant 4 expects.

@@ -1,6 +1,6 @@
 # Contributing
 
-turboEQ needs Zig 0.16.0 and Node. Python is only needed for the parity harness.
+turboEQ needs Zig 0.17.1 and Node. Python is only needed for the parity harness.
 
 ## Building and testing
 
@@ -14,7 +14,7 @@ npm ci && npm run lint                # formatting; `zig fmt --check src tools b
 npm run build && cd demo && npm install && npm run dev   # the demo site, against js/
 ```
 
-CI runs all of the above, the parity check below, and a soak over the three committed real
+CI runs all of the above, the parity check below, and a soak over the committed real
 measurements. It also installs the packed tarball and runs a fit through it.
 
 Unit tests and the parity harness run on the host target. `smoke.mjs` and `soak.mjs` are
@@ -50,7 +50,7 @@ judged on loss.
 
 ## Changing the solver or its kernel
 
-The eight fixtures cannot judge a change to the optimizer. The fit is chaotic: moving the
+The nine fixtures cannot judge a change to the optimizer. The fit is chaotic: moving the
 last bit of one logarithm sends a third of 12-band fits more than 1% up or down in loss.
 Judge such a change over a few hundred real measurements instead:
 
@@ -69,8 +69,8 @@ spread, and names a public measurement set to run it on.
 ## Benchmarks
 
 ```sh
-zig build bench -Doptimize=ReleaseFast        # whole pipeline
-zig build bench-fit -Doptimize=ReleaseFast    # fit only, on the parity fixtures
+zig build bench -Doptimize=fast        # whole pipeline
+zig build bench-fit -Doptimize=fast    # fit only, on the parity fixtures
 node tools/soak/soak.mjs --target TARGET DIR  # the wasm over a directory of measurements
 ```
 

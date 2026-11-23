@@ -339,7 +339,7 @@ const Kernel = struct {
         const j = jet(filt.kind, filt.fc, filt.q, filt.gain, fs);
         const rows = parameterRows(filt);
         var q: [3]Jet.Partial = @splat(.{});
-        for (rows.slice(), 0..) |wrt, k| q[k] = j.d[@intFromEnum(wrt)];
+        for (rows.slice(), 0..) |wrt, k| q[k] = j.d[@backingInt(wrt)];
         return .{
             .j = j,
             .rows = rows,
@@ -458,13 +458,25 @@ pub const Options = struct {
     /// is what a fit judged against the curve on a graph wants and what a fit
     /// judged by ear usually does not.
     sharpness_penalty: bool = true,
-    /// Let `init()` seed a peaking band on a ramp that peaks at the first or
-    /// last sample, where the bank has no shelf for that end. Upstream's
-    /// `find_peaks` cannot see either sample, so a peaking-only bank starts
-    /// with no band on a bass or treble ramp and the solver rarely moves one
-    /// there. A starting layout, not a change to the objective, but off by
-    /// default because the fixtures record upstream's.
-    seed_edges: bool = false,
+    /// The ends of the curve where `init()` may seed a peaking band on a ramp
+    /// that peaks at the first or last sample. Upstream's `find_peaks` cannot
+    /// see either sample, so a bank with no shelf starts with no band on a
+    /// bass or treble ramp and the solver rarely moves one there. A starting
+    /// layout, not a change to the objective. Neither end here, which is
+    /// upstream's `init()` and what the fixtures record; `pipeline.run` is
+    /// where the second start is on by default.
+    seed_edges: EdgeSeeds = .{},
+};
+
+/// Which ends of the curve `init()` may seed a band on. See
+/// `Options.seed_edges`.
+pub const EdgeSeeds = struct {
+    low: bool = false,
+    high: bool = false,
+
+    pub fn any(self: EdgeSeeds) bool {
+        return self.low or self.high;
+    }
 };
 
 /// The first index `squaredLoss` flattens: `argmin(abs(f - 10000))` upstream,
@@ -514,7 +526,7 @@ pub const Peq = struct {
     /// `Options.sharpness_penalty`.
     sharpness: bool,
     /// `Options.seed_edges`.
-    seed_edges: bool,
+    seed_edges: EdgeSeeds,
 
     /// `4*sin(w/2)^2` for each frequency. Fixed for the life of the fit, so
     /// the magnitude's only transcendental never enters the inner loop.
@@ -812,7 +824,7 @@ pub const Peq = struct {
                 if (self.sharpness and filt.kind == .peaking) {
                     // d/dp mean((fr * coef)^2), both factors varying.
                     g += 2.0 * coef * coef * dot_fr[j] / nf;
-                    g += 2.0 * coef * dcoef[@intFromEnum(wrt.slice()[j])] * fr_sq_sum / nf;
+                    g += 2.0 * coef * dcoef[@backingInt(wrt.slice()[j])] * fr_sq_sum / nf;
                 }
                 // The loss is the square root of everything above.
                 grad[i + j] = if (squared > 0) g / (2.0 * value) else 0;
@@ -882,7 +894,7 @@ pub const Peq = struct {
 
         // A shelf owns its end of the curve; an edge is seeded only where the
         // bank has none.
-        var edges: EdgeSeeds = .{ .low = self.seed_edges, .high = self.seed_edges };
+        var edges = self.seed_edges;
         for (self.filters) |filt| switch (filt.kind) {
             .low_shelf => edges.low = false,
             .high_shelf => edges.high = false,
@@ -1015,8 +1027,6 @@ fn initRank(filt: Filter) f64 {
 // ---------------------------------------------------------------------------
 
 /// Which ends of the curve `initPeaking` may seed a band on.
-const EdgeSeeds = struct { low: bool = false, high: bool = false };
-
 fn initFilter(
     allocator: std.mem.Allocator,
     filt: *Filter,
@@ -1054,12 +1064,14 @@ fn initPeaking(
     // Seeded, the same ranking runs over the curve reflected about each end
     // the bank has no shelf for, so a ramp that tops out there is a candidate
     // too. A peak then ranks by the part of its width that lies on the curve,
-    // and seeds a band as wide as the whole of it.
+    // and seeds a band as wide as the whole of it. Only a band free to move
+    // is seeded: one with its centre pinned cannot go to the ramp whatever it
+    // starts as, so it keeps upstream's start.
     var best_size = -math.inf(f64);
     var best: ?peaks.Measured = null;
     for ([2]f64{ 1.0, -1.0 }) |sign| {
         for (clipped, target) |*c, t| c.* = @max(sign * t, 0.0);
-        if (edges.low or edges.high) {
+        if (filt.optimize_fc and edges.any()) {
             const found = try peaks.measureReflected(allocator, clipped, edges.low, edges.high);
             defer allocator.free(found);
             for (found) |r| {
@@ -1543,7 +1555,9 @@ test "seeding puts a band on a ramp that tops out at the first sample" {
     for ([2]bool{ false, true }) |seed| {
         const filters = try peakingConfig(allocator, 2);
         defer allocator.free(filters);
-        var eq = try Peq.init(allocator, f, 44100.0, filters, target, .{ .seed_edges = seed });
+        var eq = try Peq.init(allocator, f, 44100.0, filters, target, .{
+            .seed_edges = .{ .low = seed, .high = seed },
+        });
         defer eq.deinit();
         const params = try allocator.alloc(f64, eq.paramCount());
         defer allocator.free(params);
@@ -1564,12 +1578,32 @@ test "seeding puts a band on a ramp that tops out at the first sample" {
             .{ .kind = .peaking, .fc = 0, .q = 0, .gain = 0, .limits = peaking_limits },
             .{ .kind = .low_shelf, .fc = 0, .q = 0, .gain = 0, .limits = shelf_limits },
         };
-        var eq = try Peq.init(allocator, f, 44100.0, &filters, target, .{ .seed_edges = seed });
+        var eq = try Peq.init(allocator, f, 44100.0, &filters, target, .{
+            .seed_edges = .{ .low = seed, .high = seed },
+        });
         defer eq.deinit();
         const params = try allocator.alloc(f64, eq.paramCount());
         defer allocator.free(params);
         try eq.initialParams(params);
         start.* = .{ filters[0].fc, filters[0].q, filters[0].gain };
+    }
+    try std.testing.expectEqualSlices(f64, &starts[0], &starts[1]);
+
+    // So does a pinned centre: a graphic EQ's sliders cannot move to the ramp,
+    // and a second start for them would be a second fit of the same thing.
+    for ([2]bool{ false, true }, &starts) |seed, *start| {
+        var filters = [_]Filter{
+            .{ .kind = .peaking, .fc = 1000, .q = 0, .gain = 0, .optimize_fc = false, .limits = peaking_limits },
+            .{ .kind = .peaking, .fc = 4000, .q = 0, .gain = 0, .optimize_fc = false, .limits = peaking_limits },
+        };
+        var eq = try Peq.init(allocator, f, 44100.0, &filters, target, .{
+            .seed_edges = .{ .low = seed, .high = seed },
+        });
+        defer eq.deinit();
+        const params = try allocator.alloc(f64, eq.paramCount());
+        defer allocator.free(params);
+        try eq.initialParams(params);
+        start.* = .{ filters[0].q, filters[0].gain, filters[1].gain };
     }
     try std.testing.expectEqualSlices(f64, &starts[0], &starts[1]);
 }

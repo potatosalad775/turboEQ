@@ -53,7 +53,8 @@ the SIMD build where the engine supports it; both builds return bit-identical fi
 
 ## Options
 
-Every option defaults to AutoEq's default; [`turboeq.d.ts`](js/turboeq.d.ts) lists them all.
+Every option that AutoEq has defaults to AutoEq's default; [`turboeq.d.ts`](js/turboeq.d.ts)
+lists them all.
 The common ones:
 
 | Option                            | Default   |                                                                 |
@@ -66,7 +67,7 @@ The common ones:
 | `peakingMinFc` … `peakingMaxGain` | AutoEq's  | Bounds on every peaking band                                    |
 | `lossMinF`, `lossMaxF`            | 20, 20000 | The band the error is scored over                               |
 | `lossFlattenF`                    | 10000     | Above this only mean level is scored; `Infinity` scores shape   |
-| `seedEdges`                       | `false`   | Also try a start with a band on a ramp at 20 Hz or 20 kHz       |
+| `seedEdges`                       | `true`    | Also try a start with a band on a ramp at 20 Hz or 20 kHz       |
 | `fit`                             | `autoeq`  | `'exact'` fits the curve's shape to 20 kHz, CrinGraph-style     |
 
 **`peaking` counts peaking bands only.** `shelves: true` adds two more filters on top, so

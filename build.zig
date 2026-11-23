@@ -25,11 +25,11 @@ pub fn build(b: *std.Build) void {
 
     const run_dump = b.addRunArtifact(dump);
     run_dump.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_dump.addArgs(args);
+    run_dump.addPassthruArgs();
     b.step("dump", "Write candidate.json from the fixture inputs").dependOn(&run_dump.step);
 
     // End-to-end timing of the whole pipeline. Build it with
-    // -Doptimize=ReleaseFast or the numbers mean nothing.
+    // -Doptimize=fast or the numbers mean nothing.
     const bench = b.addExecutable(.{
         .name = "bench",
         .root_module = b.createModule(.{
@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_bench = b.addRunArtifact(bench);
-    if (b.args) |args| run_bench.addArgs(args);
+    run_bench.addPassthruArgs();
     b.step("bench", "Time the whole pipeline end to end").dependOn(&run_bench.step);
 
     // Fit-only timing on the parity fixtures' optimizer inputs, the turboEQ
@@ -55,7 +55,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_bench_fit = b.addRunArtifact(bench_fit);
-    if (b.args) |args| run_bench_fit.addArgs(args);
+    run_bench_fit.addPassthruArgs();
     b.step("bench-fit", "Time the fit alone against upstream's recorded loss").dependOn(&run_bench_fit.step);
 
     // -----------------------------------------------------------------------
@@ -65,17 +65,17 @@ pub fn build(b: *std.Build) void {
     // it through the flat f64 ABI in src/wasm.zig. `-fno-entry` because there
     // is no `main`, `rdynamic` to keep the `export fn`s in the table.
     //
-    // ReleaseSmall, and not tied to -Doptimize. It costs 2% to 3% of run time
-    // against ReleaseFast and saves a third of the module, and the two produce
+    // The `small` mode, and not tied to -Doptimize. It costs 2% to 3% of run
+    // time against `fast` and saves a third of the module, and the two produce
     // bit-identical fits — same parameters, same evaluation counts. A third
     // of a module matters more than 3% of a fit. BENCHMARKS.md has the
-    // numbers; build the other with -Dwasm-optimize=ReleaseFast.
+    // numbers; build the other with -Dwasm-optimize=fast.
     // -----------------------------------------------------------------------
     const wasm_optimize = b.option(
-        std.builtin.OptimizeMode,
+        std.lang.Optimize,
         "wasm-optimize",
-        "Optimization mode for the wasm artifact (default ReleaseSmall)",
-    ) orelse .ReleaseSmall;
+        "Optimization mode for the wasm artifact (default small)",
+    ) orelse .small;
 
     // Two builds of the same source. `turboeq-simd.wasm` adds simd128, which
     // the optimizer's kernel is written for with `@Vector`; `turboeq.wasm` is

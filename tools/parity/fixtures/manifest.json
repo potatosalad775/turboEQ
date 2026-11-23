@@ -55,6 +55,13 @@
    "points": 957,
    "source": "bass_heavy_iem.txt",
    "target": "target_harman_ie_2019v2.txt"
+  },
+  {
+   "file": "real_bass_rolloff.json",
+   "id": "real_bass_rolloff",
+   "points": 955,
+   "source": "bass_rolloff_overear.txt",
+   "target": "target_harman_oe_2018.txt"
   }
  ],
  "meta": {

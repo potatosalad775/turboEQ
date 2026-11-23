@@ -1,6 +1,6 @@
 //! Fit-only timing against upstream AutoEq, on the parity fixtures.
 //!
-//!     zig build bench-fit -Doptimize=ReleaseFast -- [--reps N] [--csv] [--fixtures DIR]
+//!     zig build bench-fit -Doptimize=fast -- [--reps N] [--csv] [--fixtures DIR] [--second-start]
 //!
 //! Every fixture case records, per `PEQ_CONFIGS` entry, the optimizer's own
 //! 1.02 grid and target at full precision and the loss upstream's
@@ -15,6 +15,12 @@
 //!
 //! `tools/parity/time_upstream.py` times upstream on the same inputs and
 //! joins the two with `--turboeq` on this program's `--csv` output.
+//!
+//! The fit starts where upstream's does, as the parity harness has it.
+//! `--second-start` also fits from the start `pipeline.run` adds by default,
+//! seeded on the ends of the curve the bank has no shelf for, and keeps the
+//! lower loss; the time and the evaluations are then both fits'. It is for
+//! `tools/parity/survey_upstream.py`, not for the comparison above.
 
 const std = @import("std");
 const turboeq = @import("turboeq");
@@ -66,11 +72,36 @@ fn fitOnce(
     target: []const f64,
     fs: f64,
     target_loss: ?f64,
+    second_start: bool,
+) !peq.Report {
+    var report = try fitFrom(allocator, bank, f, target, fs, target_loss, .{});
+    if (second_start) {
+        const alt = try fitFrom(allocator, bank, f, target, fs, target_loss, .{ .low = true, .high = true });
+        report.evaluations += alt.evaluations;
+        report.iterations += alt.iterations;
+        if (alt.loss < report.loss) {
+            report.loss = alt.loss;
+            report.status = alt.status;
+        }
+    }
+    return report;
+}
+
+fn fitFrom(
+    allocator: std.mem.Allocator,
+    bank: configs.Bank,
+    f: []const f64,
+    target: []const f64,
+    fs: f64,
+    target_loss: ?f64,
+    edges: peq.EdgeSeeds,
 ) !peq.Report {
     const filters = try bank.build(allocator);
     defer allocator.free(filters);
 
-    var eq = try peq.Peq.init(allocator, f, fs, filters, target, bank.optimizer orelse .{});
+    var opts = bank.optimizer orelse peq.Options{};
+    opts.seed_edges = edges;
+    var eq = try peq.Peq.init(allocator, f, fs, filters, target, opts);
     defer eq.deinit();
     eq.stop.target_loss = target_loss;
 
@@ -92,13 +123,14 @@ fn time(
     fs: f64,
     target_loss: ?f64,
     reps: usize,
+    second_start: bool,
 ) !Timing {
     const times = try allocator.alloc(f64, reps);
     defer allocator.free(times);
     var report: peq.Report = undefined;
     for (times) |*t| {
         const started = std.Io.Clock.awake.now(io);
-        report = try fitOnce(allocator, bank, f, target, fs, target_loss);
+        report = try fitOnce(allocator, bank, f, target, fs, target_loss, second_start);
         const ns = started.durationTo(std.Io.Clock.awake.now(io)).nanoseconds;
         t.* = @as(f64, @floatFromInt(ns)) / 1.0e6;
     }
@@ -111,6 +143,7 @@ pub fn main(init: std.process.Init) !void {
 
     var reps: usize = 9;
     var csv = false;
+    var second_start = false;
     var fixtures: []const u8 = "tools/parity/fixtures";
     var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, allocator);
     defer args.deinit();
@@ -120,6 +153,8 @@ pub fn main(init: std.process.Init) !void {
             reps = try std.fmt.parseInt(usize, args.next() orelse return error.MissingValue, 10);
         } else if (std.mem.eql(u8, arg, "--csv")) {
             csv = true;
+        } else if (std.mem.eql(u8, arg, "--second-start")) {
+            second_start = true;
         } else if (std.mem.eql(u8, arg, "--fixtures")) {
             fixtures = args.next() orelse return error.MissingValue;
         } else {
@@ -162,8 +197,8 @@ pub fn main(init: std.process.Init) !void {
 
             // A fit that never gets down to upstream's loss runs on to
             // convergence instead, and its row says so through `equal.loss`.
-            const equal = try time(allocator, io, bank, f, target, fs, upstream_loss, reps);
-            const converged = try time(allocator, io, bank, f, target, fs, null, reps);
+            const equal = try time(allocator, io, bank, f, target, fs, upstream_loss, reps, second_start);
+            const converged = try time(allocator, io, bank, f, target, fs, null, reps, second_start);
 
             if (csv) {
                 std.debug.print("{s},{s},{d:.9},{d:.4},{d:.9},{d},{d:.4},{d:.9},{d}\n", .{

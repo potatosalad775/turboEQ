@@ -461,7 +461,7 @@ test "an unconstrained quadratic lands on its minimum" {
     const c = [_]f64{ 1.0, -3.0, 7.5 };
     const w = [_]f64{ 1.0, 4.0, 0.25 };
     var x = [_]f64{ 0.0, 0.0, 0.0 };
-    const bounds = [_]Bound{.{ .lo = -100, .hi = 100 }} ** 3;
+    const bounds: [3]Bound = @splat(.{ .lo = -100, .hi = 100 });
     const r = try minimize(std.testing.allocator, Quadratic{ .c = &c, .w = &w }, &x, &bounds, .{});
     try std.testing.expect(r.loss < 1e-12);
     for (x, c) |xv, cv| try std.testing.expectApproxEqAbs(cv, xv, 1e-6);
@@ -496,7 +496,7 @@ const Rosenbrock = struct {
 
 test "a curved valley is followed to its floor" {
     var x = [_]f64{ -1.2, 1.0, -1.2, 1.0 };
-    const bounds = [_]Bound{.{ .lo = -10, .hi = 10 }} ** 4;
+    const bounds: [4]Bound = @splat(.{ .lo = -10, .hi = 10 });
     const r = try minimize(std.testing.allocator, Rosenbrock{}, &x, &bounds, .{});
     try std.testing.expect(r.loss < 1e-10);
     for (x) |v| try std.testing.expectApproxEqAbs(@as(f64, 1.0), v, 1e-4);

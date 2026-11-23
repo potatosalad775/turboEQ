@@ -105,6 +105,16 @@ pub const Config = struct {
     /// this says which error it is scored against. Its `flatten_f` applies to
     /// every bank, including one with its own band.
     optimizer: peq.Options = .{},
+    /// Fit each bank from a second start as well as upstream's, one that may
+    /// put a peaking band on a ramp topping out at 20 Hz or 20 kHz, and keep
+    /// the lower loss. Upstream's `init()` cannot see either end sample and
+    /// leaves such a ramp to a shelf, so a run with no shelf for an end
+    /// strands it; an end that any bank has a shelf for is left to the shelf
+    /// and fitted once. On by default, as a starting layout and not a change
+    /// to the objective. This flag decides it for the run, not
+    /// `optimizer.seed_edges`, which `run` overwrites. BENCHMARKS.md has what
+    /// it buys.
+    seed_edges: bool = true,
     stop: peq.StopRules = .{},
 };
 
@@ -325,6 +335,17 @@ pub fn run(
         try curve.interpolate(allocator, f, equalization, fcs, gain_centers);
     }
 
+    // The ends no bank of the run has a shelf for. Decided over the run and
+    // not bank by bank: each half of upstream's CLI cascade lacks one shelf,
+    // and seeding the end the other half's shelf is there for costs half
+    // again the time and moves nothing.
+    var edges: peq.EdgeSeeds = .{ .low = cfg.seed_edges, .high = cfg.seed_edges };
+    for (banks) |bank| for (bank.filters) |filt| switch (filt.kind) {
+        .low_shelf => edges.low = false,
+        .high_shelf => edges.high = false,
+        .peaking => {},
+    };
+
     var loss: f64 = 0;
     var iterations: usize = 0;
     var evaluations: usize = 0;
@@ -349,7 +370,7 @@ pub fn run(
         var opts = bank.optimizer orelse cfg.optimizer;
         opts.flatten_f = cfg.optimizer.flatten_f;
         opts.sharpness_penalty = cfg.optimizer.sharpness_penalty;
-        opts.seed_edges = cfg.optimizer.seed_edges;
+        opts.seed_edges = edges;
         var fit = try peq.Peq.init(allocator, optimizer_f, cfg.fs, slice, residual, opts);
         defer fit.deinit();
 
@@ -365,15 +386,15 @@ pub fn run(
         // put a band on an end ramp is fitted too wherever it differs, and the
         // lower loss is kept, so the option can only match or beat upstream's
         // layout by the fit's own measure.
-        fit.seed_edges = false;
+        fit.seed_edges = .{};
         try fit.initialParams(params);
         fit.bounds(bounds);
         var report: peq.Report = undefined;
         const seeded = try allocator.alloc(f64, params.len);
         defer allocator.free(seeded);
         var second = false;
-        if (opts.seed_edges and params.len > 0) {
-            fit.seed_edges = true;
+        if (edges.any() and params.len > 0) {
+            fit.seed_edges = edges;
             try fit.initialParams(seeded);
             second = !std.mem.eql(f64, seeded, params);
         }
@@ -787,6 +808,90 @@ test "the default path is unchanged by the cascade machinery" {
     }
     try testing.expectApproxEqAbs(implicit.rmse, explicit.rmse, 1e-12);
     try testing.expectApproxEqAbs(implicit.max_gain, explicit.max_gain, 1e-12);
+}
+
+/// A bass boost that keeps rising down to the first sample, the shape
+/// `find_peaks` has nothing to report for, beside three bumps it does report.
+fn bassRamp(allocator: std.mem.Allocator, n: usize) ![2][]f64 {
+    const f = try allocator.alloc(f64, n);
+    const db = try allocator.alloc(f64, n);
+    const lo = math.log10(20.0);
+    const hi = math.log10(20000.0);
+    for (0..n) |i| {
+        const t = @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(n - 1));
+        f[i] = math.pow(f64, 10.0, lo + t * (hi - lo));
+        db[i] = @max(0.0, 9.0 * (1.0 - @log2(f[i] / 20.0) / 3.0));
+        for ([_][2]f64{ .{ 700.0, 6.0 }, .{ 2500.0, -7.0 }, .{ 6000.0, 6.0 } }) |bump| {
+            const u = @log2(f[i] / bump[0]) / 0.25;
+            db[i] += bump[1] * @exp(-u * u);
+        }
+    }
+    return .{ f, db };
+}
+
+test "a run with no shelf still gets a band onto a ramp at the end of the curve" {
+    const allocator = testing.allocator;
+    const src = try bassRamp(allocator, 300);
+    defer allocator.free(src[0]);
+    defer allocator.free(src[1]);
+    const tgt_f = [_]f64{ 20.0, 20000.0 };
+    const tgt_db = [_]f64{ 0.0, 0.0 };
+
+    // Upstream's start alone, then the default, which tries a second.
+    var plain = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, .{
+        .peaking = 4,
+        .shelves = false,
+        .seed_edges = false,
+    });
+    defer plain.deinit();
+    var seeded = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, .{
+        .peaking = 4,
+        .shelves = false,
+    });
+    defer seeded.deinit();
+
+    var lowest = math.inf(f64);
+    for (seeded.filters) |filt| lowest = @min(lowest, filt.fc);
+    try testing.expect(lowest < 60.0);
+    // The better of two starts cannot lose to the first of them.
+    try testing.expect(seeded.loss <= plain.loss);
+    // Upstream's start spends its fourth band beside the three bumps and
+    // leaves the ramp where it is.
+    try testing.expect(seeded.rmse < 0.5 * plain.rmse);
+}
+
+test "a shelf anywhere in the run keeps its end to itself, and the fit to one start" {
+    const allocator = testing.allocator;
+    const src = try bassRamp(allocator, 300);
+    defer allocator.free(src[0]);
+    defer allocator.free(src[1]);
+    const tgt_f = [_]f64{ 20.0, 20000.0 };
+    const tgt_db = [_]f64{ 0.0, 0.0 };
+
+    // The built-in bank has both shelves. Each half of the CLI cascade has
+    // one, and between them both. A graphic EQ has neither, but no band of
+    // it can move. None of the three is fitted twice.
+    const graphic = [_]configs.Bank{configs.byName("10_BAND_GRAPHIC_EQ").?};
+    for ([_]Config{
+        .{},
+        .{ .banks = &configs.autoeq_cli_default },
+        .{ .banks = &graphic },
+    }) |base| {
+        var off = base;
+        off.seed_edges = false;
+        var a = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, base);
+        defer a.deinit();
+        var b = try run(allocator, src[0], src[1], &tgt_f, &tgt_db, off);
+        defer b.deinit();
+
+        try testing.expectEqual(b.evaluations, a.evaluations);
+        try testing.expectEqual(b.loss, a.loss);
+        for (a.filters, b.filters) |x, y| {
+            try testing.expectEqual(y.fc, x.fc);
+            try testing.expectEqual(y.q, x.q);
+            try testing.expectEqual(y.gain, x.gain);
+        }
+    }
 }
 
 test "upstream_stop_rules applies the bank's own min_std" {

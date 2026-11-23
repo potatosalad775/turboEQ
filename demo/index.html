@@ -91,8 +91,9 @@
 					<label class="field">
 						<span>Fit mode</span>
 						<!-- AutoEq smooths the treble over two octaves, limits the correction to
-						     18 dB per octave and scores only the mean level above 10 kHz. Exact
-						     match turns all three off; max boost still applies. -->
+						     18 dB per octave, scores only the mean level above 10 kHz, penalizes
+						     steep bands and smooths the curve once more before fitting. Exact
+						     match turns all five off; max boost still applies. -->
 						<select id="fit-mode">
 							<option value="autoeq">AutoEq (smoothed treble)</option>
 							<option value="exact">Exact match</option>

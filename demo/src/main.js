@@ -123,12 +123,13 @@ function options() {
 	const common = {
 		maxGain: Number($('max-gain').value),
 		sampleRate: Number($('sample-rate').value),
-		// AutoEq's treble handling off: no mean-only loss above 10 kHz, the
-		// main smoothing window all the way up, no slope limit. The boost cap
-		// stays, and is what keeps a dip from being filled with +20 dB.
-		...($('fit-mode').value === 'exact'
-			? { lossFlattenF: Infinity, trebleWindowSize: 1 / 12, maxSlope: Infinity }
-			: {})
+		// 'exact' is the binding's preset for everything of AutoEq's that
+		// keeps a fit off the curve as drawn: the mean-only loss above 10 kHz,
+		// the wide treble smoothing, the slope limit, the penalty on steep
+		// bands and the last smoothing pass. The boost cap stays, and is what
+		// keeps a dip from being filled with +20 dB. The range below is passed
+		// outright in both modes, so it wins over the preset's 20 kHz.
+		fit: $('fit-mode').value
 	};
 	// Pinned shelves ignore the range; every free fc takes it.
 	if (shelves !== 'free') {

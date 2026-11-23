@@ -134,4 +134,8 @@ REAL_CASES = [
     ('real_rough_treble', 'rough_treble_iem.txt', 'target_harman_ie_2019v2.txt'),
     ('real_deep_dip',     'deep_dip_overear.txt', None),
     ('real_bass_shelf',   'bass_heavy_iem.txt',   'target_harman_ie_2019v2.txt'),
+    ('real_bass_rolloff', 'bass_rolloff_overear.txt', 'target_harman_oe_2018.txt'),
 ]
+# `bass_ramp_iem.txt` is in real/ and is not a case here: against a flat target
+# turboEQ's shelved fits stop in a local minimum above upstream's loss, which
+# the comparator would fail. real/README.md has the numbers.

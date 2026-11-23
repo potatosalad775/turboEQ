@@ -54,7 +54,6 @@ eq.run(source, target, {
 	maxSlope: Infinity, // no slope limit
 	sharpnessPenalty: false, // no penalty on steep bands
 	equalizationWindowSize: 0, // no last smoothing pass
-	seedEdges: true, // a second start, for ramps at 20 Hz and 20 kHz
 	peakingMaxFc: 20000
 });
 ```
@@ -65,29 +64,6 @@ to go past AutoEq's 10 kHz.
 
 `trebleWindowSize` and `maxSlope` are parameters AutoEq itself exposes. The other three change
 AutoEq's objective. [Fidelity](fidelity.md) has more on that distinction.
-
-## A band for each end of the curve
-
-Exact match also sets `seedEdges: true`, which changes where the fit starts and not what it
-aims at.
-
-AutoEq starts each peaking band on a peak or dip of the curve, and its peak finder never reports
-the first or last sample. A bass boost that keeps rising down to 20 Hz, or a roll-off that keeps
-falling, has no peak to find. AutoEq's presets leave such a ramp to the low shelf. A bank with no
-low shelf starts with no band there, and the solver rarely moves one down from the treble: on a
-real IEM with 10 dB of bass over a flat target, ten peaking bands leave 7 dB of it in place.
-
-With `seedEdges`, turboEQ fits from a second start as well, one that treats a ramp topping out
-at either end as half of a peak centred there, and keeps whichever start reaches the lower loss.
-It can only match or beat the first start by the fit's own measure, and it takes up to twice as
-long. An end the bank has a shelf for is left to the shelf, so a fit with both shelves is the
-same fit, in the same time.
-
-It works under AutoEq's objective too. There it is off unless you ask:
-
-```js
-eq.run(source, target, { peaking: 10, shelves: false, seedEdges: true });
-```
 
 ## The boost cap still applies
 

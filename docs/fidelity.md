@@ -13,8 +13,8 @@ Everything about _how you ask for a fit_ and _what you do with the answer_ is tu
 own: the JavaScript binding, the wasm interface, the EqualizerAPO formatter.
 
 turboEQ works as a drop-in replacement for AutoEq's optimizer, so it never _requires_ you
-to do work upstream of it. Anything that departs from upstream is opt-in. The default path
-is the faithful one.
+to do work upstream of it. Anything that changes what a fit optimizes is opt-in. The
+default path is the faithful one.
 
 ## What is ported
 
@@ -54,9 +54,9 @@ Two upstream quirks are **not** reproduced:
 
 ## How it is checked
 
-`tools/parity` runs upstream AutoEq over eight cases and records every intermediate array.
-Five cases are synthetic curves. Three are real measurements, chosen for deep nulls, rough
-treble and heavy bass. The Zig port is diffed against all of them:
+`tools/parity` runs upstream AutoEq over nine cases and records every intermediate array.
+Five cases are synthetic curves. Four are real measurements, chosen for deep nulls, rough
+treble, heavy bass and a bass roll-off. The Zig port is diffed against all of them:
 
 - Every array agrees to within 5e-10, the floor set by the fixtures' own rounding.
 - Every discrete decision matches exactly: peak indices, protection masks, clip points.
@@ -72,8 +72,8 @@ These differences change how the fit is _searched_, never what it _optimizes_.
 **The solver.** Upstream calls `fmin_slsqp` with bounds and no other constraints, so a
 projected L-BFGS solves the same problem. turboEQ also computes gradients analytically,
 where upstream finite-differences them. Different solvers land in different local minima of
-near-identical quality, so filter parameters will not match upstream's, but the loss is
-equal or lower. That is why parity is judged on loss.
+near-identical quality, so filter parameters will not match upstream's, but on every parity
+case the loss is equal or lower. That is why parity is judged on loss.
 
 **Early stopping is off.** Upstream's `min_std` rule stops when the loss plateaus. That
 costs fit quality at every band count, and past a dozen bands it makes more filters fit
@@ -87,6 +87,19 @@ is available as `configs.autoeq_cli_default` in Zig, or as `banks` in JavaScript
 preset AutoEq ships does the same. Freeing them lowers the loss on most real curves, at 1.5x
 the fit time, and you can do it with `peakingBank`'s `shelfPlacement: 'free'` or through
 [`banks`](custom-filters.md#describing-the-filters-yourself).
+
+**A second start for the ends of the curve.** AutoEq starts each peaking band on a peak or
+dip of the curve, and its peak finder never reports the first or last sample. A bass boost
+that keeps rising down to 20 Hz, or a roll-off that keeps falling, has no peak to find.
+AutoEq's presets leave such a ramp to the low shelf. A fit with no low shelf starts with no
+band there, and the solver rarely moves one down: on a real IEM with 10 dB of bass over a
+flat target, ten peaking bands leave 7 dB of it in place, in AutoEq as in turboEQ. So
+turboEQ also fits from a second start, one that treats a ramp topping out at either end as
+half of a peak centred there, and keeps whichever start reaches the lower loss. It can only
+match or beat AutoEq's start by the fit's own measure, and where it applies the fit takes
+up to twice as long. An end that any bank has a shelf for is left to the shelf, and a band
+with a fixed frequency is not seeded, so the default fit, AutoEq's cascade and a graphic EQ
+are each fitted once, as before. `seedEdges: false` is AutoEq's start alone.
 
 **No `max_time`.** The wasm build has no clock. `maxEvaluations` caps the work instead, and
 unlike a wall-clock budget it gives the same result on every machine.
@@ -105,10 +118,6 @@ Three options change what the fit optimizes, and each applies only when you set 
   the last step of building the curve the optimizer fits.
 
 `fit: 'exact'` sets all three. [Exact match](exact-match.md) covers them.
-
-`seedEdges` is a fourth opt-in, and it leaves the objective alone. It fits from a second
-starting layout beside AutoEq's, one that can put a peaking band on a ramp at either end of the
-curve where the bank has no shelf, and keeps the lower loss. `fit: 'exact'` sets it too.
 
 ## Out of scope
 

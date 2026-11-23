@@ -174,23 +174,25 @@ const Opt = enum(usize) {
     /// upstream. Zero skips it. An opt-in departure, like `loss_flatten_f`.
     equalization_window_size = 44,
 
-    /// Non-zero lets `init()` seed a peaking band on a ramp that peaks at the
-    /// first or last sample, where the bank has no shelf for that end. A
-    /// starting layout upstream does not have; zero, the default, is upstream.
+    /// Non-zero fits from a second start as well, one that may put a peaking
+    /// band on a ramp that peaks at the first or last sample, wherever no bank
+    /// of the run has a shelf for that end, and keeps the lower loss. A
+    /// starting layout upstream does not have, and the default; zero is
+    /// upstream's start alone.
     seed_edges = 45,
 
     const count = 46;
 };
 
 fn optAt(opts: []const f64, which: Opt, fallback: f64) f64 {
-    const i = @intFromEnum(which);
+    const i = @backingInt(which);
     if (i >= opts.len) return fallback;
     const v = opts[i];
     return if (math.isNan(v)) fallback else v;
 }
 
 fn optFlag(opts: []const f64, which: Opt, fallback: bool) bool {
-    const i = @intFromEnum(which);
+    const i = @backingInt(which);
     if (i >= opts.len) return fallback;
     const v = opts[i];
     if (math.isNan(v)) return fallback;
@@ -271,11 +273,11 @@ fn configFrom(opts: []const f64) pipeline.Config {
             .sharpness_penalty,
             defaults.optimizer.sharpness_penalty,
         ),
-        .seed_edges = optFlag(opts, .seed_edges, defaults.optimizer.seed_edges),
     };
     if (cfg.optimizer.min_f > cfg.optimizer.max_f) {
         std.mem.swap(f64, &cfg.optimizer.min_f, &cfg.optimizer.max_f);
     }
+    cfg.seed_edges = optFlag(opts, .seed_edges, defaults.seed_edges);
 
     cfg.peaking_limits = limitsFrom(opts, defaults.peaking_limits, .peaking_min_fc);
     cfg.shelf_limits = limitsFrom(opts, defaults.shelf_limits, .shelf_min_fc);
@@ -299,7 +301,7 @@ fn configFrom(opts: []const f64) pipeline.Config {
 }
 
 fn optOrNull(opts: []const f64, which: Opt) ?f64 {
-    const i = @intFromEnum(which);
+    const i = @backingInt(which);
     if (i >= opts.len) return null;
     const v = opts[i];
     return if (math.isNan(v)) null else v;
@@ -308,7 +310,7 @@ fn optOrNull(opts: []const f64, which: Opt) ?f64 {
 /// The six limits sit in a fixed order starting at `first`, which is why the
 /// two blocks in `Opt` are laid out identically.
 fn limitsFrom(opts: []const f64, fallback: peq.Limits, first: Opt) peq.Limits {
-    const base = @intFromEnum(first);
+    const base = @backingInt(first);
     const at = struct {
         fn get(o: []const f64, ix: usize, d: f64) f64 {
             if (ix >= o.len) return d;
@@ -378,7 +380,7 @@ const FilterIx = enum(usize) {
 const ConfigError = error{BadConfig} || std.mem.Allocator.Error;
 
 fn slotOrNull(row: []const f64, which: anytype) ?f64 {
-    const v = row[@intFromEnum(which)];
+    const v = row[@backingInt(which)];
     return if (math.isNan(v)) null else v;
 }
 
@@ -409,7 +411,7 @@ fn banksFrom(allocator: std.mem.Allocator, spec: []const f64) ConfigError![]conf
     var n_filters: usize = 0;
     for (banks, 0..) |*bank, i| {
         const row = spec[1 + i * bank_slots ..][0..bank_slots];
-        const count = try countAt(row[@intFromEnum(BankIx.filter_count)]);
+        const count = try countAt(row[@backingInt(BankIx.filter_count)]);
         if (count == 0) return error.BadConfig;
         n_filters += count;
         // `filters` is patched below, once the total is known and the rest of
@@ -437,7 +439,7 @@ fn banksFrom(allocator: std.mem.Allocator, spec: []const f64) ConfigError![]conf
     for (filters, 0..) |*filt, i| {
         const row = spec[filters_at + i * filter_slots ..][0..filter_slots];
         filt.* = configs.fromSpec(.{
-            .kind = try kindFrom(row[@intFromEnum(FilterIx.kind)]),
+            .kind = try kindFrom(row[@backingInt(FilterIx.kind)]),
             .fc = slotOrNull(row, FilterIx.fc),
             .q = slotOrNull(row, FilterIx.q),
             .gain = slotOrNull(row, FilterIx.gain),
@@ -457,7 +459,7 @@ fn banksFrom(allocator: std.mem.Allocator, spec: []const f64) ConfigError![]conf
 
     var at: usize = 0;
     for (banks, 0..) |*bank, i| {
-        const count = try countAt(spec[1 + i * bank_slots + @intFromEnum(BankIx.filter_count)]);
+        const count = try countAt(spec[1 + i * bank_slots + @backingInt(BankIx.filter_count)]);
         bank.filters = filters[at..][0..count];
         at += count;
     }
@@ -712,14 +714,14 @@ fn runInto(
     if (needed > out_cap) return err_output_too_small;
 
     const slots = out[0..needed];
-    slots[@intFromEnum(OutIx.filter_count)] = @floatFromInt(result.filters.len);
-    slots[@intFromEnum(OutIx.loss)] = result.loss;
-    slots[@intFromEnum(OutIx.rmse)] = result.rmse;
-    slots[@intFromEnum(OutIx.max_gain)] = result.max_gain;
-    slots[@intFromEnum(OutIx.preamp)] = -@max(0.0, result.max_gain);
-    slots[@intFromEnum(OutIx.iterations)] = @floatFromInt(result.iterations);
-    slots[@intFromEnum(OutIx.evaluations)] = @floatFromInt(result.evaluations);
-    slots[@intFromEnum(OutIx.status)] = statusCode(result.status);
+    slots[@backingInt(OutIx.filter_count)] = @floatFromInt(result.filters.len);
+    slots[@backingInt(OutIx.loss)] = result.loss;
+    slots[@backingInt(OutIx.rmse)] = result.rmse;
+    slots[@backingInt(OutIx.max_gain)] = result.max_gain;
+    slots[@backingInt(OutIx.preamp)] = -@max(0.0, result.max_gain);
+    slots[@backingInt(OutIx.iterations)] = @floatFromInt(result.iterations);
+    slots[@backingInt(OutIx.evaluations)] = @floatFromInt(result.evaluations);
+    slots[@backingInt(OutIx.status)] = statusCode(result.status);
 
     for (result.filters, 0..) |filt, i| {
         const at = out_header + i * out_per_filter;
@@ -771,15 +773,15 @@ test "the ABI round-trips a curve the way the host drives it" {
 
     const opts = try allocSlots(Opt.count);
     for (0..Opt.count) |i| opts[i] = math.nan(f64);
-    opts[@intFromEnum(Opt.peaking)] = 6;
-    opts[@intFromEnum(Opt.shelves)] = 1;
+    opts[@backingInt(Opt.peaking)] = 6;
+    opts[@backingInt(Opt.shelves)] = 1;
 
     const cap = teq_output_len(8);
     const out = try allocSlots(cap);
 
     const written = teq_run(src, n, tgt, 2, opts, Opt.count, out, cap);
     try testing.expectEqual(@as(i32, @intCast(cap)), written);
-    try testing.expectEqual(@as(f64, 8), out[@intFromEnum(OutIx.filter_count)]);
+    try testing.expectEqual(@as(f64, 8), out[@backingInt(OutIx.filter_count)]);
     try testing.expectEqual(@as(f64, 1), out[out_header + 0]); // low shelf first
     try testing.expectEqual(@as(f64, 2), out[out_header + out_per_filter]); // then high
 
@@ -790,7 +792,7 @@ test "the ABI round-trips a curve the way the host drives it" {
         if (out[at + 1] > 2000.0 and out[at + 1] < 4500.0 and out[at + 3] < -3.0) found = true;
     }
     try testing.expect(found);
-    try testing.expect(out[@intFromEnum(OutIx.rmse)] > 0.0);
+    try testing.expect(out[@backingInt(OutIx.rmse)] > 0.0);
     try testing.expect(teq_heap_used() < heap_size);
 }
 
@@ -840,7 +842,7 @@ test "bad input is reported, not trapped" {
     tgt[3] = 0.0;
     const opts = try allocSlots(Opt.count);
     for (0..Opt.count) |i| opts[i] = math.nan(f64);
-    opts[@intFromEnum(Opt.peaking)] = 2;
+    opts[@backingInt(Opt.peaking)] = 2;
     const cap = teq_output_len(4);
     const out = try allocSlots(cap);
 
@@ -881,8 +883,8 @@ test "an option slot left NaN takes the default" {
 
 test "an inverted bound is ordered rather than handed to the solver" {
     var opts: [Opt.count]f64 = @splat(math.nan(f64));
-    opts[@intFromEnum(Opt.peaking_min_q)] = 6.0;
-    opts[@intFromEnum(Opt.peaking_max_q)] = 0.5;
+    opts[@backingInt(Opt.peaking_min_q)] = 6.0;
+    opts[@backingInt(Opt.peaking_max_q)] = 0.5;
     const cfg = configFrom(&opts);
     try testing.expectEqual(@as(f64, 0.5), cfg.peaking_limits.min_q);
     try testing.expectEqual(@as(f64, 6.0), cfg.peaking_limits.max_q);
@@ -911,9 +913,9 @@ fn descriptorFixture(n: usize) !struct { src: [*]f64, tgt: [*]f64, opts: [*]f64 
 
 fn writeFilter(spec: [*]f64, at: usize, kind: f64, fields: anytype) void {
     for (0..filter_slots) |k| spec[at + k] = math.nan(f64);
-    spec[at + @intFromEnum(FilterIx.kind)] = kind;
-    inline for (@typeInfo(@TypeOf(fields)).@"struct".fields) |field| {
-        spec[at + @intFromEnum(@field(FilterIx, field.name))] = @field(fields, field.name);
+    spec[at + @backingInt(FilterIx.kind)] = kind;
+    inline for (@typeInfo(@TypeOf(fields)).@"struct".field_names) |name| {
+        spec[at + @backingInt(@field(FilterIx, name))] = @field(fields, name);
     }
 }
 
@@ -931,7 +933,7 @@ test "a descriptor pins what it supplies and frees what it does not" {
     const spec = try allocSlots(cap);
     for (0..cap) |i| spec[i] = math.nan(f64);
     spec[0] = 1;
-    spec[1 + @intFromEnum(BankIx.filter_count)] = 3;
+    spec[1 + @backingInt(BankIx.filter_count)] = 3;
 
     const base = 1 + bank_slots;
     writeFilter(spec, base, 1, .{ .fc = 105.0, .q = 0.7 });
@@ -942,7 +944,7 @@ test "a descriptor pins what it supplies and frees what it does not" {
     const out = try allocSlots(out_cap);
     const written = teq_run_config(fix.src, n, fix.tgt, 2, fix.opts, Opt.count, spec, cap, undefined, 0, out, out_cap);
     try testing.expectEqual(@as(i32, @intCast(out_cap)), written);
-    try testing.expectEqual(@as(f64, 3), out[@intFromEnum(OutIx.filter_count)]);
+    try testing.expectEqual(@as(f64, 3), out[@backingInt(OutIx.filter_count)]);
 
     // The shelf kept both of its pinned parameters.
     try testing.expectEqual(@as(f64, 1), out[out_header + 0]);
@@ -971,11 +973,11 @@ test "a two bank descriptor cascades and returns both banks' filters" {
     const spec = try allocSlots(cap);
     for (0..cap) |i| spec[i] = math.nan(f64);
     spec[0] = 2;
-    spec[1 + @intFromEnum(BankIx.filter_count)] = 2;
+    spec[1 + @backingInt(BankIx.filter_count)] = 2;
     // The first bank is scored to 10 kHz only, the way
     // `4_PEAKING_WITH_LOW_SHELF` is.
-    spec[1 + @intFromEnum(BankIx.max_f)] = 10000.0;
-    spec[1 + bank_slots + @intFromEnum(BankIx.filter_count)] = 2;
+    spec[1 + @backingInt(BankIx.max_f)] = 10000.0;
+    spec[1 + bank_slots + @backingInt(BankIx.filter_count)] = 2;
 
     const base = 1 + 2 * bank_slots;
     for (0..4) |i| writeFilter(spec, base + i * filter_slots, 0, .{});
@@ -984,15 +986,15 @@ test "a two bank descriptor cascades and returns both banks' filters" {
     const out = try allocSlots(out_cap);
     const written = teq_run_config(fix.src, n, fix.tgt, 2, fix.opts, Opt.count, spec, cap, undefined, 0, out, out_cap);
     try testing.expectEqual(@as(i32, @intCast(out_cap)), written);
-    try testing.expectEqual(@as(f64, 4), out[@intFromEnum(OutIx.filter_count)]);
+    try testing.expectEqual(@as(f64, 4), out[@backingInt(OutIx.filter_count)]);
 
     // Four bands fitted in two passes beat the first pass alone.
     const half_cap = teq_config_len(1, 2);
     const half = try allocSlots(half_cap);
     for (0..half_cap) |i| half[i] = math.nan(f64);
     half[0] = 1;
-    half[1 + @intFromEnum(BankIx.filter_count)] = 2;
-    half[1 + @intFromEnum(BankIx.max_f)] = 10000.0;
+    half[1 + @backingInt(BankIx.filter_count)] = 2;
+    half[1 + @backingInt(BankIx.max_f)] = 10000.0;
     for (0..2) |i| writeFilter(half, 1 + bank_slots + i * filter_slots, 0, .{});
 
     const half_out_cap = teq_output_len(2);
@@ -1011,7 +1013,7 @@ test "a two bank descriptor cascades and returns both banks' filters" {
         half_out,
         half_out_cap,
     );
-    try testing.expect(out[@intFromEnum(OutIx.rmse)] < half_out[@intFromEnum(OutIx.rmse)]);
+    try testing.expect(out[@backingInt(OutIx.rmse)] < half_out[@backingInt(OutIx.rmse)]);
 }
 
 test "a malformed descriptor is reported, not trapped" {
@@ -1043,11 +1045,11 @@ test "a malformed descriptor is reported, not trapped" {
 
     // A bank claiming more filters than the descriptor carries.
     spec[0] = 1;
-    spec[1 + @intFromEnum(BankIx.filter_count)] = 9;
+    spec[1 + @backingInt(BankIx.filter_count)] = 9;
     try testing.expectEqual(err_bad_config, run(fix, spec, cap, out, out_cap, n));
 
     // An unknown filter kind.
-    spec[1 + @intFromEnum(BankIx.filter_count)] = 1;
+    spec[1 + @backingInt(BankIx.filter_count)] = 1;
     writeFilter(spec, 1 + bank_slots, 7, .{});
     try testing.expectEqual(err_bad_config, run(fix, spec, cap, out, out_cap, n));
 
@@ -1071,21 +1073,21 @@ test "the new option slots reach the perceptual stage" {
 
     const baseline = teq_run(fix.src, n, fix.tgt, 2, fix.opts, Opt.count, out, cap);
     try testing.expect(baseline > 0);
-    const baseline_rmse = out[@intFromEnum(OutIx.rmse)];
+    const baseline_rmse = out[@backingInt(OutIx.rmse)];
 
     // Smoothing the whole axis at two octaves flattens the bump the fit was
     // chasing, so the equalization it lands on differs.
-    fix.opts[@intFromEnum(Opt.window_size)] = 2.0;
+    fix.opts[@backingInt(Opt.window_size)] = 2.0;
     try testing.expect(teq_run(fix.src, n, fix.tgt, 2, fix.opts, Opt.count, out, cap) > 0);
-    try testing.expect(out[@intFromEnum(OutIx.rmse)] != baseline_rmse);
+    try testing.expect(out[@backingInt(OutIx.rmse)] != baseline_rmse);
 
     // An inverted transition band would assert inside `smoothen`; it is
     // replaced rather than passed through.
-    fix.opts[@intFromEnum(Opt.window_size)] = math.nan(f64);
-    fix.opts[@intFromEnum(Opt.treble_f_lower)] = 9000.0;
-    fix.opts[@intFromEnum(Opt.treble_f_upper)] = 1000.0;
+    fix.opts[@backingInt(Opt.window_size)] = math.nan(f64);
+    fix.opts[@backingInt(Opt.treble_f_lower)] = 9000.0;
+    fix.opts[@backingInt(Opt.treble_f_upper)] = 1000.0;
     try testing.expect(teq_run(fix.src, n, fix.tgt, 2, fix.opts, Opt.count, out, cap) > 0);
-    try testing.expectApproxEqAbs(baseline_rmse, out[@intFromEnum(OutIx.rmse)], 1e-12);
+    try testing.expectApproxEqAbs(baseline_rmse, out[@backingInt(OutIx.rmse)], 1e-12);
 }
 
 test "a sound signature reaches the target through the descriptor export" {
@@ -1099,7 +1101,7 @@ test "a sound signature reaches the target through the descriptor export" {
     const spec = try allocSlots(cap);
     for (0..cap) |i| spec[i] = math.nan(f64);
     spec[0] = 1;
-    spec[1 + @intFromEnum(BankIx.filter_count)] = 4;
+    spec[1 + @backingInt(BankIx.filter_count)] = 4;
     for (0..4) |i| writeFilter(spec, 1 + bank_slots + i * filter_slots, 0, .{});
 
     const out_cap = teq_output_len(4);
@@ -1122,7 +1124,7 @@ test "a sound signature reaches the target through the descriptor export" {
         out_cap,
     );
     try testing.expect(written > 0);
-    const plain_rmse = out[@intFromEnum(OutIx.rmse)];
+    const plain_rmse = out[@backingInt(OutIx.rmse)];
 
     // A signature asking for 4 dB more above 5 kHz moves the fit.
     const sig = try allocSlots(3 * 2);
@@ -1148,11 +1150,11 @@ test "a sound signature reaches the target through the descriptor export" {
         out_cap,
     );
     try testing.expect(written > 0);
-    try testing.expect(out[@intFromEnum(OutIx.rmse)] != plain_rmse);
+    try testing.expect(out[@backingInt(OutIx.rmse)] != plain_rmse);
 
     // And the smoothing slot is read rather than ignored.
-    fix.opts[@intFromEnum(Opt.sound_signature_smoothing)] = 1.0;
-    const unsmoothed = out[@intFromEnum(OutIx.rmse)];
+    fix.opts[@backingInt(Opt.sound_signature_smoothing)] = 1.0;
+    const unsmoothed = out[@backingInt(OutIx.rmse)];
     written = teq_run_config(
         fix.src,
         n,
@@ -1168,7 +1170,7 @@ test "a sound signature reaches the target through the descriptor export" {
         out_cap,
     );
     try testing.expect(written > 0);
-    try testing.expect(out[@intFromEnum(OutIx.rmse)] != unsmoothed);
+    try testing.expect(out[@backingInt(OutIx.rmse)] != unsmoothed);
 }
 
 test "the default limits are readable rather than transcribed" {

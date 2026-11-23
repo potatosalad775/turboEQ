@@ -203,9 +203,9 @@ full — rather than exporting it or writing a copy by hand.
 - **`teq_run` rewinds the arena, it does not reset it.** Buffers from
   `teq_alloc` survive the call. Only `teq_reset` frees them, and after it
   every pointer the host holds is dangling.
-- **The wasm build is stripped and ships ReleaseSmall**, independent of
-  `-Doptimize` (`-Dwasm-optimize` overrides). Both wasm modes give
-  bit-identical fits; ReleaseSmall is a third smaller for 2% to 3% of run
+- **The wasm build is stripped and ships the `small` mode**, independent of
+  `-Doptimize` (`-Dwasm-optimize=fast` overrides). Both wasm modes give
+  bit-identical fits; `small` is a third smaller for 2% to 3% of run
   time. Unit tests and the parity harness run on the **host** target, so
   `smoke.mjs` and `soak.mjs` are the only checks of the artifact a browser
   gets.
@@ -237,6 +237,25 @@ objective, which is what makes them allowed. BENCHMARKS.md has the evidence.
   opt-in. No fixture reaches the free-shelf `init()` path, so `peq.zig`'s "free
   shelves place themselves" test and the smoke's free-shelf check are its only
   cover.
+- **A second start where no shelf has the end** (`seedEdges`,
+  `pipeline.Config.seed_edges`). `find_peaks` never reports an end sample, and
+  a peak a sample or two in from an end has its base search cut off there, so
+  `Peaking.init` has nothing to seed on a ramp that tops out at 20 Hz or
+  20 kHz. Upstream's presets leave that to a shelf; a run without one strands
+  it, upstream included (`10_PEAKING` on `real/bass_ramp_iem.txt` ends at RMSE
+  3.0). `pipeline.run` fits each bank from upstream's start and from one
+  ranked over the curve reflected about each open end
+  (`peaks.measureReflected`), and keeps the lower loss. Both are fitted
+  because the seeded start alone lost to upstream's on 12% to 35% of real
+  fits: a different start is a different local minimum. **The gate is per
+  run, not per bank**: an end is open only if no bank of the run has a shelf
+  for it. Each half of the CLI cascade lacks one shelf, and seeding those cost
+  1.6x the time for 0.01 dB of median RMSE. A band whose `fc` is pinned is
+  never seeded, so a graphic EQ is fitted once as well. `peq.Options.seed_edges`
+  stays empty by default, which is what keeps `dump_candidate` and the
+  `peq init` fixtures on upstream's start; the pipeline's default has no
+  fixture behind it, only the pipeline tests, `smoke.mjs`'s `edges` line and
+  the soak in BENCHMARKS.md.
 
 **`lossFlattenF`, `sharpnessPenalty` and `equalizationWindowSize` are opt-in
 departures from the objective**, and `fit: 'exact'` is the binding's name for all of
@@ -247,21 +266,6 @@ loss and its gradient; `equalization_window_size` is the fifth-octave pass upstr
 hardcodes at the end of `equalize`, 0 skipping it. A free level (the loss blind to a
 constant offset) was tried as a fourth and removed: with two shelves able to lift the
 whole curve for nothing, the fit drifted past `maxGain`.
-
-**`seedEdges` is an opt-in second start, not a change to the objective**, and
-`EXACT_MATCH_OPTIONS` carries it. `find_peaks` never reports an end sample, and a peak
-a sample or two in from an end has its base search cut off there, so `Peaking.init`
-has nothing to seed on a ramp that tops out at 20 Hz or 20 kHz. Upstream's presets
-leave that to a shelf; a bank without one strands it, upstream included (`10_PEAKING`
-on `real/bass_ramp_iem.txt` ends at RMSE 3.0). With `peq.Options.seed_edges`,
-`pipeline.run` fits each bank from upstream's start and from one ranked over the curve
-reflected about each end the bank has no shelf for (`peaks.measureReflected`), and
-keeps the lower loss. Both starts are fitted because the seeded one alone lost to
-upstream's on 12% to 35% of real fits: a different start is a different local minimum.
-A bank with both shelves gets one start and the same fit to the bit. The default path
-never calls `measureReflected`, which is what keeps the `peq init` fixtures green.
-`smoke.mjs`'s `edges` line and the unit tests are its only cover; see
-`tools/parity/real/README.md` for why its curves are not parity cases yet.
 
 **`lossFlattenF` in detail.** Upstream's
 `_optimizer_loss` flattens both curves to their mean above 10 kHz, which
@@ -288,11 +292,19 @@ zig build dump                                 # writes candidate.json
 python tools/parity/compare.py candidate.json
 ```
 
-Green over eight cases, five synthetic and three real measurements from
+Green over nine cases, five synthetic and four real measurements from
 `tools/parity/real/`. The counts are in BENCHMARKS.md and printed by the
 commands above; do not copy them into comments. `BETTER` is a lower loss than
 upstream reached, which invariant 4 expects. Unimplemented stages report
 `SKIP`; `--strict` fails on them.
+
+**"Equal or lower" has a known counterexample, and it is not a case.**
+`real/bass_ramp_iem.txt` against a flat target: `init()` matches upstream to
+the fixture's precision, and the shelved fits then stop in a local minimum at
+three times upstream's loss. Restarting the solver there does not move it, and
+started from upstream's answer it goes lower than upstream did, so it is the
+landscape and not a bug in the port. `tools/parity/real/README.md` has the
+numbers. Do not loosen `compare.py` to pin it.
 
 Only regeneration needs upstream. Clone blobless and sparse _before_ the
 submodule checkout, or `submodule update --init` checks out all 75,797 files
@@ -312,7 +324,7 @@ BLAS underneath it. That is invariant 4, not drift, but it would bury a real
 change in noise across every committed fixture.
 
 **The fixtures cannot judge a change to the solver or its kernel.** They
-cover eight cases, and the fit is chaotic: moving the last bit of one
+cover nine cases, and the fit is chaotic: moving the last bit of one
 logarithm sends a third of 12-band fits and two thirds of 20-band fits more
 than 1% up or down in loss. Run `tools/soak/soak.mjs --tsv` before and after
 over a few hundred real measurements, and `tools/soak/compare.mjs` the two.
@@ -328,10 +340,16 @@ it. `--self-test` cannot catch either problem.
 
 ## Conventions
 
-- **Zig 0.16.0**, pinned in `build.zig.zon`. 0.16 reworked `std.Io`: file
+- **Zig 0.17.1**, pinned in `build.zig.zon`. 0.16 reworked `std.Io`: file
   access goes through `std.Io.Dir` with an explicit `Io`, `main` takes a
   `std.process.Init`, and `GeneralPurposeAllocator` is now `DebugAllocator`.
-  Most Zig examples online predate this.
+  0.17 moved more: `**` on arrays is gone (`@splat`), `zig fmt` rewrites
+  `@intFromEnum` to `@backingInt`, `@typeInfo` of a struct has `field_names`
+  and `field_types` where it had `fields`, `b.args` is
+  `run.addPassthruArgs()`, and the optimize modes are `debug`, `safe`, `fast`
+  and `small` (`std.lang.Optimize`). Most Zig examples online predate all of
+  this. A compiler bump is a change to the solver's kernel as far as the fits
+  go: soak before and after. 0.16.0 to 0.17.1 gave the same fits to the bit.
 - Every function takes an explicit `std.mem.Allocator` and no module holds
   global state, so the wasm build needs only a `FixedBufferAllocator` over an
   8 MiB static array. Keep it that way.

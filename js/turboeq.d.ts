@@ -107,11 +107,14 @@ export interface TurboEQOptions {
 
 	/**
 	 * Also start the fit with a peaking band on a ramp that tops out at 20 Hz
-	 * or 20 kHz, wherever the bank has no shelf for that end, and keep
-	 * whichever start reaches the lower loss. AutoEq's `init()` cannot see
-	 * either end sample, so a peaking-only bank can leave a bass ramp
-	 * uncorrected. Never worse than without it by the fit's own loss; up to
-	 * twice the solver time. Changes where the fit starts, not its objective.
+	 * or 20 kHz, and keep whichever start reaches the lower loss. AutoEq's
+	 * `init()` cannot see either end sample, so a fit with no shelf can leave
+	 * a bass ramp uncorrected. An end that any bank has a shelf for is left to
+	 * the shelf, and a band whose `fc` is pinned is not seeded, so the default
+	 * fit and a graphic EQ are fitted once. Never worse than without it by the
+	 * fit's own loss; up to twice the solver time where it applies. Changes
+	 * where the fit starts, not its objective. Default `true`; `false` is
+	 * AutoEq's start alone.
 	 */
 	seedEdges?: boolean;
 }
@@ -125,7 +128,6 @@ export declare const EXACT_MATCH_OPTIONS: Readonly<{
 	maxSlope: number;
 	sharpnessPenalty: false;
 	equalizationWindowSize: 0;
-	seedEdges: true;
 }>;
 
 /** Everything `run` takes: the scalars above, plus the two that are structure. */

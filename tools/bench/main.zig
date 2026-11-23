@@ -1,6 +1,6 @@
 //! End-to-end timing for the whole pipeline.
 //!
-//!     zig build bench -Doptimize=ReleaseFast -- [--reps N] [--csv]
+//!     zig build bench -Doptimize=fast -- [--reps N] [--csv]
 //!
 //! The curve is `curves.bumpy` from tools/parity on a 1/48-octave grid: ten
 //! alternating features, 479 points, 20 Hz to 20 kHz, against a flat target.

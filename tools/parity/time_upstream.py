@@ -1,6 +1,6 @@
 """Time upstream's fit on the parity fixtures, and join it with turboEQ's.
 
-    zig build bench-fit -Doptimize=ReleaseFast -- --csv 2> turboeq_fit.csv
+    zig build bench-fit -Doptimize=fast -- --csv 2> turboeq_fit.csv
     python tools/parity/time_upstream.py --turboeq turboeq_fit.csv
 
 Each fixture case records the optimizer's 1.02 grid and target at full
