@@ -80,6 +80,19 @@ same inputs; keep their config lists in step, and re-run both before quoting a r
 Every number quoted anywhere goes in [BENCHMARKS.md](BENCHMARKS.md) with the command that
 produced it.
 
+## Releasing
+
+```sh
+npm version minor        # or patch, or 0.3.0-beta.1: bumps package.json, commits, tags
+git push --follow-tags
+```
+
+The tag runs `.github/workflows/release.yml`: every CI check on the tagged commit, then
+`npm publish` if the tag matches `package.json`. A prerelease version is published under the
+`next` dist-tag. The workflow authenticates by npm trusted publishing, so the repository
+holds no npm token; the package's settings on npmjs.com name this repository and
+`release.yml` as its trusted publisher.
+
 ## Where things are
 
 | Path                               | What it is                                                             |

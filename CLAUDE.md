@@ -17,6 +17,9 @@ because a scoped package is otherwise private): the binding, both `.d.ts` files,
 both wasm builds and `NOTICE`. `prepack` builds the wasm and copies
 `turboeq.wasm` and `turboeq-simd.wasm` into `js/`, where they are gitignored,
 so `TurboEQ.load()` finds them beside the binding. CI installs the packed tarball and runs a fit through it.
+A `v<version>` tag publishes: `.github/workflows/release.yml` reruns CI on the tag and
+publishes by npm trusted publishing, so no token lives in the repo. `CONTRIBUTING.md`
+has the steps.
 
 ## Repo layout
 
