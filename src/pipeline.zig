@@ -349,6 +349,7 @@ pub fn run(
         var opts = bank.optimizer orelse cfg.optimizer;
         opts.flatten_f = cfg.optimizer.flatten_f;
         opts.sharpness_penalty = cfg.optimizer.sharpness_penalty;
+        opts.seed_edges = cfg.optimizer.seed_edges;
         var fit = try peq.Peq.init(allocator, optimizer_f, cfg.fs, slice, residual, opts);
         defer fit.deinit();
 
@@ -360,9 +361,36 @@ pub fn run(
         const bounds = try allocator.alloc(peq.Bound, params.len);
         defer allocator.free(bounds);
 
+        // Upstream's start first. With `seed_edges`, a second start that may
+        // put a band on an end ramp is fitted too wherever it differs, and the
+        // lower loss is kept, so the option can only match or beat upstream's
+        // layout by the fit's own measure.
+        fit.seed_edges = false;
         try fit.initialParams(params);
         fit.bounds(bounds);
-        const report = try fit.optimize(params, bounds);
+        var report: peq.Report = undefined;
+        const seeded = try allocator.alloc(f64, params.len);
+        defer allocator.free(seeded);
+        var second = false;
+        if (opts.seed_edges and params.len > 0) {
+            fit.seed_edges = true;
+            try fit.initialParams(seeded);
+            second = !std.mem.eql(f64, seeded, params);
+        }
+        report = try fit.optimize(params, bounds);
+        if (second) {
+            const alt = try fit.optimize(seeded, bounds);
+            report.iterations += alt.iterations;
+            report.evaluations += alt.evaluations;
+            if (alt.loss < report.loss) {
+                report.loss = alt.loss;
+                report.status = alt.status;
+                @memcpy(params, seeded);
+            } else {
+                fit.setParams(params);
+                fit.refresh();
+            }
+        }
 
         // `loss` and `status` describe the last bank, which for a single
         // bank is what they always described. The counts are totals.

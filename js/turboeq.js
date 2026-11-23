@@ -159,17 +159,26 @@ const OPTION_SLOTS = {
 	 * hardcodes 1/5, which blurs anything narrower out of what the fit
 	 * aims at; 0 skips the pass. A departure from upstream's objective.
 	 */
-	equalizationWindowSize: 44
+	equalizationWindowSize: 44,
+	/**
+	 * Fit from a second start as well, one that may put a peaking band on a
+	 * ramp that tops out at 20 Hz or 20 kHz, wherever the bank has no shelf
+	 * for that end, and keep whichever start reaches the lower loss. AutoEq's
+	 * `init()` cannot see either end sample, so a peaking-only bank can leave
+	 * a bass ramp uncorrected. Changes where the fit starts, not the
+	 * objective; off is upstream.
+	 */
+	seedEdges: 45
 };
 
-const OPTION_COUNT = 45;
+const OPTION_COUNT = 46;
 
 /**
  * What `fit: 'exact'` stands for: every AutoEq choice that keeps a fit from
  * following the curve as a graph shows it, turned off. `trebleWindowSize` and
- * `maxSlope` are parameters AutoEq itself exposes; the other three depart
- * from its objective. An option the caller passes outright wins over its
- * entry here.
+ * `maxSlope` are parameters AutoEq itself exposes; the next three depart
+ * from its objective, and `seedEdges` changes only where the fit starts. An
+ * option the caller passes outright wins over its entry here.
  */
 export const EXACT_MATCH_OPTIONS = Object.freeze({
 	/** Score the treble's shape, not only its mean. */
@@ -181,7 +190,9 @@ export const EXACT_MATCH_OPTIONS = Object.freeze({
 	/** Narrow, deep bands are allowed to cost what they fit. */
 	sharpnessPenalty: false,
 	/** Nothing blurs the target after the slope limit, which is off anyway. */
-	equalizationWindowSize: 0
+	equalizationWindowSize: 0,
+	/** A bank with no shelf for an end may still start a band on a ramp there. */
+	seedEdges: true
 });
 
 /** Where `fit: 'exact'` lets the built-in bank's peaking bands reach, Hz. */

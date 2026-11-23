@@ -287,6 +287,76 @@ if (!refused) {
 	process.exitCode = 1;
 }
 
+// `seedEdges` fits from a second start that may put a band on a ramp topping
+// out at 20 Hz or 20 kHz, and keeps the lower loss. Three things have to hold
+// on real curves: it never loses to upstream's start, it changes nothing where
+// the bank has both shelves, and on the two curves whose bass is such a ramp
+// a peaking-only fit gets a band down there. Upstream's start leaves
+// `bass_ramp_iem` with 6 to 7 dB uncorrected below 40 Hz, its lowest band
+// near 300 Hz.
+const real = async (name) =>
+	(await readFile(new URL(`../parity/real/${name}`, import.meta.url), 'utf8'))
+		.split(/\r?\n/)
+		.map((line) => line.trim().split(/[\t,]/).map(Number))
+		.filter((row) => row.length >= 2 && row[0] > 0 && Number.isFinite(row[1]))
+		.map(([f, db]) => [f, db]);
+const realCurves = {};
+for (const name of [
+	'rough_treble_iem',
+	'deep_dip_overear',
+	'bass_heavy_iem',
+	'bass_ramp_iem',
+	'bass_rolloff_overear'
+]) {
+	realCurves[name] = await real(`${name}.txt`);
+}
+const lowestFc = (r) => Math.min(...r.filters.map((f) => f.fc));
+let seedLost = 0;
+let seedRuns = 0;
+for (const curve of Object.values(realCurves)) {
+	for (const fit of ['autoeq', 'exact']) {
+		for (const peakingBands of [5, 10]) {
+			const ask = { fit, peaking: peakingBands, shelves: false };
+			const plain = eq.run(curve, target, { ...ask, seedEdges: false });
+			const seeded = eq.run(curve, target, { ...ask, seedEdges: true });
+			seedRuns += 1;
+			if (seeded.loss > plain.loss) seedLost += 1;
+		}
+	}
+}
+const shelved = { peaking: 8, shelves: true };
+const shelvedSame =
+	JSON.stringify(eq.run(realCurves.bass_ramp_iem, target, { ...shelved, seedEdges: true })) ===
+	JSON.stringify(eq.run(realCurves.bass_ramp_iem, target, { ...shelved, seedEdges: false }));
+// Exact match seeds without being asked; AutoEq's objective only when told to.
+const ramp = eq.run(realCurves.bass_ramp_iem, target, {
+	fit: 'exact',
+	peaking: 10,
+	shelves: false
+});
+const rampAutoEq = eq.run(realCurves.bass_ramp_iem, target, {
+	peaking: 10,
+	shelves: false,
+	seedEdges: true
+});
+// The other direction, a boost: an open-back's roll-off against Harman's
+// over-ear target, which wants more than the default 6 dB cap leaves room
+// for. Upstream's start puts its lowest band above 1 kHz here.
+const rolloff = eq.run(realCurves.bass_rolloff_overear, await real('target_harman_oe_2018.txt'), {
+	fit: 'exact',
+	peaking: 8,
+	shelves: false,
+	maxGain: 12
+});
+const rampReached = lowestFc(ramp) < 60 && ramp.rmse < 0.5 && lowestFc(rampAutoEq) < 60;
+const rolloffReached = lowestFc(rolloff) < 60 && rolloff.rmse < 2;
+console.log(
+	`edges     ${'—'.padStart(6)}     RMSE ${ramp.rmse.toFixed(4)}  ` +
+		`never worse: ${seedRuns - seedLost}/${seedRuns}  shelved fit unchanged: ${shelvedSame}  ` +
+		`ramp reached: ${rampReached}  roll-off reached: ${rolloffReached}`
+);
+if (seedLost || !shelvedSame || !rampReached || !rolloffReached) process.exitCode = 1;
+
 // The SIMD build does the same arithmetic in the same order, so its fits are
 // bit-identical, not merely close. Anything less means the two builds would
 // hand users on different browsers different EQs.
@@ -302,7 +372,9 @@ if (TurboEQ.supportsSimd()) {
 	const cases = [
 		...[1, 3, 6, 8, 12, 20].map((peaking) => ({ peaking, shelves: true })),
 		{ banks: qudelix },
-		{ banks: cliDefault }
+		{ banks: cliDefault },
+		{ peaking: 10, shelves: false, seedEdges: true },
+		{ fit: 'exact', peaking: 10, shelves: false }
 	];
 	const differ = cases.filter((options) => {
 		const a = eq.run(source, target, options);

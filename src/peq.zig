@@ -458,6 +458,13 @@ pub const Options = struct {
     /// is what a fit judged against the curve on a graph wants and what a fit
     /// judged by ear usually does not.
     sharpness_penalty: bool = true,
+    /// Let `init()` seed a peaking band on a ramp that peaks at the first or
+    /// last sample, where the bank has no shelf for that end. Upstream's
+    /// `find_peaks` cannot see either sample, so a peaking-only bank starts
+    /// with no band on a bass or treble ramp and the solver rarely moves one
+    /// there. A starting layout, not a change to the objective, but off by
+    /// default because the fixtures record upstream's.
+    seed_edges: bool = false,
 };
 
 /// The first index `squaredLoss` flattens: `argmin(abs(f - 10000))` upstream,
@@ -506,6 +513,8 @@ pub const Peq = struct {
     flat_ix: usize,
     /// `Options.sharpness_penalty`.
     sharpness: bool,
+    /// `Options.seed_edges`.
+    seed_edges: bool,
 
     /// `4*sin(w/2)^2` for each frequency. Fixed for the life of the fit, so
     /// the magnitude's only transcendental never enters the inner loop.
@@ -554,6 +563,7 @@ pub const Peq = struct {
             .max_f_ix = util.argminAbs(f, opts.max_f),
             .flat_ix = flatIndex(f, opts.flatten_f),
             .sharpness = opts.sharpness_penalty,
+            .seed_edges = opts.seed_edges,
             .phi = phi,
             .fr = try allocator.alloc(f64, f.len),
             .filt_fr = try allocator.alloc(f64, filters.len * f.len),
@@ -870,9 +880,18 @@ pub const Peq = struct {
             }
         }.lessThan);
 
+        // A shelf owns its end of the curve; an edge is seeded only where the
+        // bank has none.
+        var edges: EdgeSeeds = .{ .low = self.seed_edges, .high = self.seed_edges };
+        for (self.filters) |filt| switch (filt.kind) {
+            .low_shelf => edges.low = false,
+            .high_shelf => edges.high = false,
+            .peaking => {},
+        };
+
         const scratch = self.filt_fr[0..n];
         for (order) |ix| {
-            try initFilter(self.allocator, &self.filters[ix], self.f, self.fs, remaining);
+            try initFilter(self.allocator, &self.filters[ix], self.f, self.fs, remaining, edges);
             self.filters[ix].asBiquad().response(self.f, self.fs, scratch);
             for (remaining, scratch) |*r, v| r.* -= v;
         }
@@ -995,15 +1014,19 @@ fn initRank(filt: Filter) f64 {
 // Filter init heuristics
 // ---------------------------------------------------------------------------
 
+/// Which ends of the curve `initPeaking` may seed a band on.
+const EdgeSeeds = struct { low: bool = false, high: bool = false };
+
 fn initFilter(
     allocator: std.mem.Allocator,
     filt: *Filter,
     f: []const f64,
     fs: f64,
     target: []const f64,
+    edges: EdgeSeeds,
 ) !void {
     switch (filt.kind) {
-        .peaking => try initPeaking(allocator, filt, f, target),
+        .peaking => try initPeaking(allocator, filt, f, target, edges),
         .low_shelf, .high_shelf => try initShelf(allocator, filt, f, fs, target),
     }
 }
@@ -1017,6 +1040,7 @@ fn initPeaking(
     filt: *Filter,
     f: []const f64,
     target: []const f64,
+    edges: EdgeSeeds,
 ) !void {
     const min_fc_ix = util.argminAbs(f, filt.limits.min_fc);
     const max_fc_ix = util.argminAbs(f, filt.limits.max_fc);
@@ -1026,10 +1050,28 @@ fn initPeaking(
 
     // Peaks of the target, then peaks of its negation: `find_peaks` on
     // `clip(target, 0, None)` and on `clip(-target, 0, None)`.
+    //
+    // Seeded, the same ranking runs over the curve reflected about each end
+    // the bank has no shelf for, so a ramp that tops out there is a candidate
+    // too. A peak then ranks by the part of its width that lies on the curve,
+    // and seeds a band as wide as the whole of it.
     var best_size = -math.inf(f64);
     var best: ?peaks.Measured = null;
     for ([2]f64{ 1.0, -1.0 }) |sign| {
         for (clipped, target) |*c, t| c.* = @max(sign * t, 0.0);
+        if (edges.low or edges.high) {
+            const found = try peaks.measureReflected(allocator, clipped, edges.low, edges.high);
+            defer allocator.free(found);
+            for (found) |r| {
+                if (r.peak.index < min_fc_ix or r.peak.index > max_fc_ix) continue;
+                const size = r.inside * r.peak.height;
+                if (size > best_size) {
+                    best_size = size;
+                    best = r.peak;
+                }
+            }
+            continue;
+        }
         const found = try peaks.measure(allocator, clipped);
         defer allocator.free(found);
         for (found) |p| {
@@ -1485,6 +1527,51 @@ test "a fully pinned bank reports its loss without fitting anything" {
     // The 1.02 grid has no sample exactly at 1 kHz, so the peak reads just
     // under the filter's nominal gain.
     try std.testing.expectApproxEqAbs(@as(f64, 3.0), eq.maxGain(), 0.01);
+}
+
+test "seeding puts a band on a ramp that tops out at the first sample" {
+    // A bass ramp with nothing else on the curve: `find_peaks` reports no
+    // peak, so upstream parks every band flat mid-range. Seeded, the first
+    // band starts on the ramp, as wide as the peak the ramp is half of.
+    const allocator = std.testing.allocator;
+    const f = try testGrid(allocator);
+    defer allocator.free(f);
+    const target = try allocator.alloc(f64, f.len);
+    defer allocator.free(target);
+    for (f, target) |fv, *t| t.* = @max(0.0, 8.0 * (1.0 - @log2(fv / 20.0) / 3.0));
+
+    for ([2]bool{ false, true }) |seed| {
+        const filters = try peakingConfig(allocator, 2);
+        defer allocator.free(filters);
+        var eq = try Peq.init(allocator, f, 44100.0, filters, target, .{ .seed_edges = seed });
+        defer eq.deinit();
+        const params = try allocator.alloc(f64, eq.paramCount());
+        defer allocator.free(params);
+        try eq.initialParams(params);
+
+        if (seed) {
+            try std.testing.expectApproxEqAbs(@as(f64, 20.0), filters[0].fc, 1e-9);
+            try std.testing.expect(filters[0].gain > 6.0);
+        } else {
+            for (filters) |filt| try std.testing.expectEqual(@as(f64, 0.0), filt.gain);
+        }
+    }
+
+    // A low shelf owns that end: with one in the bank, seeding changes nothing.
+    var starts: [2][3]f64 = undefined;
+    for ([2]bool{ false, true }, &starts) |seed, *start| {
+        var filters = [_]Filter{
+            .{ .kind = .peaking, .fc = 0, .q = 0, .gain = 0, .limits = peaking_limits },
+            .{ .kind = .low_shelf, .fc = 0, .q = 0, .gain = 0, .limits = shelf_limits },
+        };
+        var eq = try Peq.init(allocator, f, 44100.0, &filters, target, .{ .seed_edges = seed });
+        defer eq.deinit();
+        const params = try allocator.alloc(f64, eq.paramCount());
+        defer allocator.free(params);
+        try eq.initialParams(params);
+        start.* = .{ filters[0].fc, filters[0].q, filters[0].gain };
+    }
+    try std.testing.expectEqualSlices(f64, &starts[0], &starts[1]);
 }
 
 test "free shelves place themselves and stay inside their bounds" {

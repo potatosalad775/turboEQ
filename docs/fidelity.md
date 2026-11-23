@@ -106,6 +106,10 @@ Three options change what the fit optimizes, and each applies only when you set 
 
 `fit: 'exact'` sets all three. [Exact match](exact-match.md) covers them.
 
+`seedEdges` is a fourth opt-in, and it leaves the objective alone. It fits from a second
+starting layout beside AutoEq's, one that can put a peaking band on a ramp at either end of the
+curve where the bank has no shelf, and keeps the lower loss. `fit: 'exact'` sets it too.
+
 ## Out of scope
 
 Impulse responses, CSV I/O, batch processing, the README writer and the Harman preference

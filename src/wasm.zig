@@ -174,7 +174,12 @@ const Opt = enum(usize) {
     /// upstream. Zero skips it. An opt-in departure, like `loss_flatten_f`.
     equalization_window_size = 44,
 
-    const count = 45;
+    /// Non-zero lets `init()` seed a peaking band on a ramp that peaks at the
+    /// first or last sample, where the bank has no shelf for that end. A
+    /// starting layout upstream does not have; zero, the default, is upstream.
+    seed_edges = 45,
+
+    const count = 46;
 };
 
 fn optAt(opts: []const f64, which: Opt, fallback: f64) f64 {
@@ -266,6 +271,7 @@ fn configFrom(opts: []const f64) pipeline.Config {
             .sharpness_penalty,
             defaults.optimizer.sharpness_penalty,
         ),
+        .seed_edges = optFlag(opts, .seed_edges, defaults.optimizer.seed_edges),
     };
     if (cfg.optimizer.min_f > cfg.optimizer.max_f) {
         std.mem.swap(f64, &cfg.optimizer.min_f, &cfg.optimizer.max_f);

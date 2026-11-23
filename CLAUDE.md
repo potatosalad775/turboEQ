@@ -248,6 +248,21 @@ hardcodes at the end of `equalize`, 0 skipping it. A free level (the loss blind 
 constant offset) was tried as a fourth and removed: with two shelves able to lift the
 whole curve for nothing, the fit drifted past `maxGain`.
 
+**`seedEdges` is an opt-in second start, not a change to the objective**, and
+`EXACT_MATCH_OPTIONS` carries it. `find_peaks` never reports an end sample, and a peak
+a sample or two in from an end has its base search cut off there, so `Peaking.init`
+has nothing to seed on a ramp that tops out at 20 Hz or 20 kHz. Upstream's presets
+leave that to a shelf; a bank without one strands it, upstream included (`10_PEAKING`
+on `real/bass_ramp_iem.txt` ends at RMSE 3.0). With `peq.Options.seed_edges`,
+`pipeline.run` fits each bank from upstream's start and from one ranked over the curve
+reflected about each end the bank has no shelf for (`peaks.measureReflected`), and
+keeps the lower loss. Both starts are fitted because the seeded one alone lost to
+upstream's on 12% to 35% of real fits: a different start is a different local minimum.
+A bank with both shelves gets one start and the same fit to the bit. The default path
+never calls `measureReflected`, which is what keeps the `peq init` fixtures green.
+`smoke.mjs`'s `edges` line and the unit tests are its only cover; see
+`tools/parity/real/README.md` for why its curves are not parity cases yet.
+
 **`lossFlattenF` in detail.** Upstream's
 `_optimizer_loss` flattens both curves to their mean above 10 kHz, which
 suits rigs that are not trusted up there. `peq.Options.flatten_f` keeps

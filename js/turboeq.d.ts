@@ -104,6 +104,16 @@ export interface TurboEQOptions {
 	 * hardcodes 1/5; `0` skips the pass. Departs from upstream's objective.
 	 */
 	equalizationWindowSize?: number;
+
+	/**
+	 * Also start the fit with a peaking band on a ramp that tops out at 20 Hz
+	 * or 20 kHz, wherever the bank has no shelf for that end, and keep
+	 * whichever start reaches the lower loss. AutoEq's `init()` cannot see
+	 * either end sample, so a peaking-only bank can leave a bass ramp
+	 * uncorrected. Never worse than without it by the fit's own loss; up to
+	 * twice the solver time. Changes where the fit starts, not its objective.
+	 */
+	seedEdges?: boolean;
 }
 
 /**
@@ -115,6 +125,7 @@ export declare const EXACT_MATCH_OPTIONS: Readonly<{
 	maxSlope: number;
 	sharpnessPenalty: false;
 	equalizationWindowSize: 0;
+	seedEdges: true;
 }>;
 
 /** Everything `run` takes: the scalars above, plus the two that are structure. */

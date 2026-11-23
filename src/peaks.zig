@@ -171,6 +171,20 @@ test "find filters on prominence" {
 /// samples. `find_peaks(..., width=0)` calls it with `rel_height=0.5`, which
 /// is what the filter init heuristics want.
 pub fn width(y: []const f64, peak: usize, prom: f64, left_base: usize, right_base: usize, rel_height: f64) f64 {
+    const c = crossings(y, peak, prom, left_base, right_base, rel_height);
+    return c.right - c.left;
+}
+
+/// `left_ips` and `right_ips`: where the curve crosses the measuring height
+/// on each side of the peak, in fractional samples.
+pub fn crossings(
+    y: []const f64,
+    peak: usize,
+    prom: f64,
+    left_base: usize,
+    right_base: usize,
+    rel_height: f64,
+) struct { left: f64, right: f64 } {
     const height = y[peak] - prom * rel_height;
 
     var i = peak;
@@ -188,7 +202,7 @@ pub fn width(y: []const f64, peak: usize, prom: f64, left_base: usize, right_bas
         right_ip -= (height - y[j]) / (y[j - 1] - y[j]);
     }
 
-    return right_ip - left_ip;
+    return .{ .left = left_ip, .right = right_ip };
 }
 
 /// One entry per local maximum, carrying everything the filter init
@@ -221,6 +235,119 @@ pub fn measure(allocator: std.mem.Allocator, y: []const f64) ![]Measured {
         };
     }
     return out;
+}
+
+/// A peak of the reflected curve, with how much of its width lies on the
+/// curve itself.
+pub const Reflected = struct {
+    peak: Measured,
+    /// The part of `peak.width` between the first and last sample. Equal to
+    /// it for a peak clear of both ends, half of it for one at an end sample.
+    inside: f64,
+};
+
+/// `measure` on the curve reflected about its first sample, its last, or
+/// both, reporting the peaks that fall on the curve itself.
+///
+/// `find_peaks` never reports an end sample, and a peak one or two samples in
+/// from an end has its base search cut off there, which leaves it next to no
+/// prominence and so next to no width. Either way a ramp that tops out at
+/// 20 Hz or 20 kHz offers `init()` nothing to seed a band on. Reflected, the
+/// ramp is the near half of a peak centred on the end, and measures as one. A
+/// peak clear of the reflected ends comes out exactly as `measure` has it.
+///
+/// Not upstream.
+pub fn measureReflected(
+    allocator: std.mem.Allocator,
+    y: []const f64,
+    low: bool,
+    high: bool,
+) ![]Reflected {
+    const n = y.len;
+    if (n < 3) return allocator.alloc(Reflected, 0);
+    const pad_low: usize = if (low) n - 1 else 0;
+    const pad_high: usize = if (high) n - 1 else 0;
+
+    const padded = try allocator.alloc(f64, pad_low + n + pad_high);
+    defer allocator.free(padded);
+    for (0..pad_low) |i| padded[i] = y[pad_low - i];
+    @memcpy(padded[pad_low..][0..n], y);
+    for (0..pad_high) |i| padded[pad_low + n + i] = y[n - 2 - i];
+
+    const maxima = try localMaxima(allocator, padded);
+    defer allocator.free(maxima);
+
+    var out: std.ArrayList(Reflected) = .empty;
+    errdefer out.deinit(allocator);
+    const first: f64 = @floatFromInt(pad_low);
+    const last: f64 = @floatFromInt(pad_low + n - 1);
+    for (maxima) |m| {
+        if (m < pad_low or m > pad_low + n - 1) continue;
+        const p = prominence(padded, m);
+        const c = crossings(padded, m, p.value, p.left_base, p.right_base, 0.5);
+        try out.append(allocator, .{
+            .peak = .{
+                .index = m - pad_low,
+                .height = padded[m],
+                .prominence = p.value,
+                .width = c.right - c.left,
+            },
+            .inside = @min(c.right, last) - @max(c.left, first),
+        });
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+test "a ramp to the first sample measures as half of a peak centred there" {
+    const allocator = std.testing.allocator;
+    // Reflected about index 0 this is [0,0,1,2,1,0,0], whose one peak scipy
+    // gives a width of 2.0 at half prominence. `measure` finds nothing.
+    const y = [_]f64{ 2, 1, 0, 0 };
+    const plain = try measure(allocator, &y);
+    defer allocator.free(plain);
+    try std.testing.expectEqual(@as(usize, 0), plain.len);
+
+    const r = try measureReflected(allocator, &y, true, false);
+    defer allocator.free(r);
+    try std.testing.expectEqual(@as(usize, 1), r.len);
+    try std.testing.expectEqual(@as(usize, 0), r[0].peak.index);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.0), r[0].peak.width, 1e-12);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), r[0].inside, 1e-12);
+
+    const other_end = try measureReflected(allocator, &y, false, true);
+    defer allocator.free(other_end);
+    try std.testing.expectEqual(@as(usize, 0), other_end.len);
+}
+
+test "a shoulder one sample in from the end gets its width back" {
+    const allocator = std.testing.allocator;
+    // The peak at index 1 has a left base 0.1 below it, so 0.1 of prominence
+    // and a sliver of width. Reflected, the base is the far side of the ramp.
+    const y = [_]f64{ 4.9, 5, 4, 3, 2, 1, 0, 0 };
+    const plain = try measure(allocator, &y);
+    defer allocator.free(plain);
+    try std.testing.expect(plain[0].width < 1.0);
+
+    const r = try measureReflected(allocator, &y, true, false);
+    defer allocator.free(r);
+    try std.testing.expectEqual(@as(usize, 1), r[0].peak.index);
+    try std.testing.expect(r[0].peak.width > 5.0);
+}
+
+test "a peak clear of the ends measures the same reflected" {
+    const allocator = std.testing.allocator;
+    const y = [_]f64{ 0, 3, 2.5, 3.2, 0, 8, 0 };
+    const plain = try measure(allocator, &y);
+    defer allocator.free(plain);
+    const r = try measureReflected(allocator, &y, true, true);
+    defer allocator.free(r);
+    try std.testing.expectEqual(plain.len, r.len);
+    for (plain, r) |a, b| {
+        try std.testing.expectEqual(a.index, b.peak.index);
+        try std.testing.expectApproxEqAbs(a.prominence, b.peak.prominence, 1e-12);
+        try std.testing.expectApproxEqAbs(a.width, b.peak.width, 1e-12);
+        try std.testing.expectApproxEqAbs(a.width, b.inside, 1e-12);
+    }
 }
 
 test "width is measured at half prominence" {

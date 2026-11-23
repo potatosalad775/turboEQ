@@ -17,6 +17,29 @@ permission by myself, unmodified.
 | `bass_heavy_iem.txt`          | Largest bass tilt: +16.9 dB at 20–80 Hz relative to 500 Hz, with a 20.5 dB dip on top. Exercises the shelf init heuristics and the slope limiter over the bass.  |
 | `target_harman_ie_2019v2.txt` | Harman IE 2019v2 - A real target, on a different axis from either source, so the two no longer share a grid.                                                     |
 
+## Edge ramps
+
+Three more files, for `seedEdges`. They are inputs to `tools/wasm_smoke/smoke.mjs` and not
+parity cases: the option is not upstream's, so there is no recorded output to hold it to.
+
+| File                        | Why this one                                                                                                                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bass_ramp_iem.txt`         | A bass boost that keeps rising to the first sample: +9.6 dB at 20–40 Hz relative to 200 Hz–2 kHz, with no peak for `init()` to find. Against a flat target, a peaking-only fit leaves it uncorrected. 481 points at 1/48 octave. |
+| `bass_rolloff_overear.txt`  | The same shape as a deficit: an open-back's roll-off, 9.5 dB short of Harman's over-ear target at 20–40 Hz, relative to 200 Hz–2 kHz. A peaking-only exact fit puts its lowest band above 1 kHz. 955 points at 1/96 octave.      |
+| `target_harman_oe_2018.txt` | Harman over-ear 2018, the target the roll-off is measured against. From AutoEq's `targets/`, unmodified.                                                                                                                         |
+
+The two measurements are by potatosalad775, from the same rigs, unmodified.
+
+Upstream fails the same way. AutoEq v4.1.2's `10_PEAKING` on `bass_ramp_iem.txt` against a flat
+target ends at an RMSE of 3.0 dB with its lowest band near 290 Hz; `8_PEAKING_WITH_SHELVES`
+reaches 0.2.
+
+They are not in `curves.REAL_CASES` yet. Generated as parity cases, `bass_ramp_iem.txt` has
+turboEQ's shelved fits landing above upstream's loss (`8_PEAKING_WITH_SHELVES` 0.271 against
+0.096), which has nothing to do with seeding and wants looking into before the case is pinned.
+
+## How the first four were picked
+
 Picked by measurement rather than by taste: `profile.py` in the harness
 history ranked every curve in that repo by dip depth, treble roughness, bass
 tilt and total span, and these are the extremes.
