@@ -52,6 +52,8 @@
 	"scripts": {
 		"build": "zig build wasm && cp zig-out/bin/turboeq.wasm zig-out/bin/turboeq-simd.wasm js/",
 		"prepack": "npm run build",
+		"preversion": "node tools/release/release.mjs check",
+		"postversion": "node tools/release/release.mjs push",
 		"format": "prettier --write .",
 		"lint": "prettier --check .",
 		"smoke": "node tools/wasm_smoke/smoke.mjs"

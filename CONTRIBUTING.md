@@ -83,9 +83,13 @@ produced it.
 ## Releasing
 
 ```sh
-npm version minor        # or patch, or 0.3.0-beta.1: bumps package.json, commits, tags
-git push --follow-tags
+npm version minor        # or patch, or 0.3.0-beta.1
 ```
+
+That one command bumps `package.json` and the lockfile, commits, tags and pushes. Its hooks
+are in `tools/release/release.mjs`: before writing anything it refuses unless you are on
+`main`, level with `origin/main`, and the new tag does not exist yet; afterwards it pushes the
+commit and the tag together. Do not tag by hand.
 
 The tag runs `.github/workflows/release.yml`: every CI check on the tagged commit, then
 `npm publish` if the tag matches `package.json`. A prerelease version is published under the
