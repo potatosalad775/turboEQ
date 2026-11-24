@@ -707,13 +707,28 @@ pub const Peq = struct {
 
     /// Response of every filter together, in dB: one logarithm of the
     /// product of their power ratios, where summing `Kernel.response` takes
-    /// one per filter. The product cannot leave f64: each ratio is within the
-    /// filter's gain, and 32 filters at 40 dB come to 1e128.
+    /// one per filter.
+    ///
+    /// A product of power ratios can leave f64 where a sum of decibels
+    /// cannot, and `pipeline.run` takes as many filters as a caller spells
+    /// out, so the logarithm is taken every `cascade_run` filters. One run
+    /// stays finite until its filters together pass 3000 dB at one sample.
     inline fn cascade(self: *const Peq, p: anytype) @TypeOf(p) {
-        var ratio = Kernel.splat(@TypeOf(p), 1.0);
-        for (self.kernels) |kern| ratio *= kern.num(p) / kern.den(p);
-        return Kernel.decibels(ratio);
+        const T = @TypeOf(p);
+        var db = Kernel.splat(T, 0.0);
+        var rest: []const Kernel = self.kernels;
+        while (rest.len > 0) {
+            const run = rest[0..@min(rest.len, cascade_run)];
+            var ratio = Kernel.splat(T, 1.0);
+            for (run) |kern| ratio *= kern.num(p) / kern.den(p);
+            db += Kernel.decibels(ratio);
+            rest = rest[run.len..];
+        }
+        return db;
     }
+
+    /// `MAX_FILTERS` in the binding, so a bank it builds is one run.
+    const cascade_run = 32;
 
     /// Largest boost the cascade applies. `PEQ.max_gain`.
     pub fn maxGain(self: Peq) f64 {
@@ -1430,6 +1445,36 @@ test "without the sharpness penalty the loss is the error alone" {
         }
     }
     try std.testing.expect(losses[0] > losses[1]);
+}
+
+test "without the penalty the cascade is the filters' sum, however many there are" {
+    const allocator = std.testing.allocator;
+    const f = try testGrid(allocator);
+    defer allocator.free(f);
+    const target = try allocator.alloc(f64, f.len);
+    defer allocator.free(target);
+    @memset(target, 0);
+
+    // 100 bands of 40 dB on one frequency: a power ratio of 1e400 there,
+    // which a single product cannot hold.
+    const filters = try peakingConfig(allocator, 100);
+    defer allocator.free(filters);
+    for (filters) |*filt| {
+        filt.fc = 1000.0;
+        filt.q = 1.0;
+        filt.gain = 40.0;
+    }
+    var peq = try Peq.init(allocator, f, 44100.0, filters, target, .{ .sharpness_penalty = false });
+    defer peq.deinit();
+
+    const params = try allocator.alloc(f64, peq.paramCount());
+    defer allocator.free(params);
+    peq.getParams(params);
+    try std.testing.expect(math.isFinite(peq.evaluate(params)));
+    const through_kernel = try allocator.dupe(f64, peq.fr);
+    defer allocator.free(through_kernel);
+    peq.refresh();
+    for (through_kernel, peq.fr) |a, b| try std.testing.expectApproxEqRel(b, a, 1e-9);
 }
 
 test "optimizing lowers the loss and respects the bounds" {

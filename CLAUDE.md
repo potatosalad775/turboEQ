@@ -87,8 +87,10 @@ with the faithful path as the default and the default path fixture-covered.
    `maxGain`, go through the latter; only the loss the solver reports and
    steers by comes from the former. Without the sharpness penalty nothing
    reads a filter's own response, so `Peq.cascade` takes one logarithm per
-   sample for all the filters together: half the cost of an evaluation, and
-   different last bits again, on that path only. With the penalty the fit
+   sample for every 32 filters together: half the cost of an evaluation, and
+   different last bits again, on that path only. It is per 32 and not per
+   bank because `run` takes any number of filters and their product would
+   leave f64. With the penalty the fit
    is the one it was, to the bit.
 2. **The optimizer is box-constrained only.** Upstream calls `fmin_slsqp`
    with `bounds=` and no constraint functions. `src/lbfgs.zig`, a projected
