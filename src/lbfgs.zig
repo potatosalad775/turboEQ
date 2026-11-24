@@ -82,10 +82,16 @@ pub const Result = struct {
     status: Status,
 };
 
-/// Minimize `ctx.evaluate(x, grad)` over the box `bounds`, starting from `x`
-/// and leaving the best point found in `x`.
+/// Minimize `ctx.evaluate(x)` over the box `bounds`, starting from `x` and
+/// leaving the best point found in `x`.
 ///
-/// `ctx` is anything with `fn evaluate(self, x: []const f64, grad: []f64) f64`.
+/// `ctx` is anything with `fn evaluate(self, x: []const f64) f64` and
+/// `fn gradient(self, x: []const f64, grad: []f64) void`. The two are
+/// separate because a line-search trial needs only the value: the gradient
+/// is asked for once per accepted step, and always at the point `evaluate`
+/// was last called with, so a context may keep what that call worked out
+/// and ignore `x`.
+///
 /// It may also declare `fn shouldStop(self, loss: f64) bool`, which is asked
 /// after every accepted step and ends the run when it answers true; that is
 /// where upstream's `_callback` stopping rules live. Every step decreases the
@@ -129,7 +135,8 @@ pub fn minimize(
     for (x, bounds) |*v, b| v.* = math.clamp(v.*, b.lo, b.hi);
 
     var evaluations: usize = 1;
-    var f = ctx.evaluate(x, g);
+    var f = ctx.evaluate(x);
+    ctx.gradient(x, g);
 
     // Ring buffer of correction pairs: `stored` counts what is valid, `head`
     // is where the next pair goes.
@@ -176,13 +183,14 @@ pub fn minimize(
             // in which case no smaller step will help either.
             if (samePoint(x_trial, x)) break;
 
-            f_trial = ctx.evaluate(x_trial, g_trial);
+            f_trial = ctx.evaluate(x_trial);
             evaluations += 1;
             // Directional decrease measured on the realised displacement, not
             // on `step * d`, since the projection may have shortened it.
             var slope: f64 = 0;
             for (g, x_trial, x) |gv, t, xv| slope += gv * (t - xv);
             if (f_trial <= f + opts.armijo * slope) {
+                ctx.gradient(x_trial, g_trial);
                 accepted = true;
                 break;
             }
@@ -447,13 +455,14 @@ const Quadratic = struct {
     c: []const f64,
     w: []const f64,
 
-    fn evaluate(self: Quadratic, x: []const f64, grad: []f64) f64 {
+    fn evaluate(self: Quadratic, x: []const f64) f64 {
         var f: f64 = 0;
-        for (x, self.c, self.w, grad) |xv, cv, wv, *gv| {
-            f += wv * (xv - cv) * (xv - cv);
-            gv.* = 2 * wv * (xv - cv);
-        }
+        for (x, self.c, self.w) |xv, cv, wv| f += wv * (xv - cv) * (xv - cv);
         return f;
+    }
+
+    fn gradient(self: Quadratic, x: []const f64, grad: []f64) void {
+        for (x, self.c, self.w, grad) |xv, cv, wv, *gv| gv.* = 2 * wv * (xv - cv);
     }
 };
 
@@ -479,20 +488,54 @@ test "bounds hold and the active set is recognised as optimal" {
 }
 
 const Rosenbrock = struct {
-    fn evaluate(_: Rosenbrock, x: []const f64, grad: []f64) f64 {
+    fn evaluate(_: Rosenbrock, x: []const f64) f64 {
         var f: f64 = 0;
-        @memset(grad, 0);
         var i: usize = 0;
         while (i + 1 < x.len) : (i += 1) {
             const a = 1 - x[i];
             const b = x[i + 1] - x[i] * x[i];
             f += a * a + 100 * b * b;
-            grad[i] += -2 * a - 400 * x[i] * b;
-            grad[i + 1] += 200 * b;
         }
         return f;
     }
+
+    fn gradient(_: Rosenbrock, x: []const f64, grad: []f64) void {
+        @memset(grad, 0);
+        var i: usize = 0;
+        while (i + 1 < x.len) : (i += 1) {
+            const a = 1 - x[i];
+            const b = x[i + 1] - x[i] * x[i];
+            grad[i] += -2 * a - 400 * x[i] * b;
+            grad[i + 1] += 200 * b;
+        }
+    }
 };
+
+test "the gradient is asked only where the value was just evaluated" {
+    // What lets a context keep its last evaluation for the gradient. The
+    // valley makes the line search reject trials, so the counts differ.
+    const Watched = struct {
+        at: [4]f64 = undefined,
+        gradients: usize = 0,
+
+        fn evaluate(self: *@This(), x: []const f64) f64 {
+            @memcpy(&self.at, x);
+            return (Rosenbrock{}).evaluate(x);
+        }
+
+        fn gradient(self: *@This(), x: []const f64, grad: []f64) void {
+            std.testing.expectEqualSlices(f64, &self.at, x) catch @panic("gradient away from the last evaluation");
+            self.gradients += 1;
+            (Rosenbrock{}).gradient(x, grad);
+        }
+    };
+    var x = [_]f64{ -1.2, 1.0, -1.2, 1.0 };
+    const bounds: [4]Bound = @splat(.{ .lo = -10, .hi = 10 });
+    var ctx: Watched = .{};
+    const r = try minimize(std.testing.allocator, &ctx, &x, &bounds, .{});
+    try std.testing.expectEqual(r.iterations + 1, ctx.gradients);
+    try std.testing.expect(ctx.gradients < r.evaluations);
+}
 
 test "a curved valley is followed to its floor" {
     var x = [_]f64{ -1.2, 1.0, -1.2, 1.0 };
@@ -509,14 +552,13 @@ test "variables of wildly different size converge together" {
     // conditioned in raw ones, which is exactly what the bound metric is for.
     const Skewed = struct {
         const scale = [2]f64{ 1000.0, 0.001 };
-        fn evaluate(_: @This(), x: []const f64, grad: []f64) f64 {
+        fn evaluate(_: @This(), x: []const f64) f64 {
             var f: f64 = 0;
-            for (x, scale, grad) |xv, s, *gv| {
-                const u = xv / s - 1.0;
-                f += u * u;
-                gv.* = 2 * u / s;
-            }
+            for (x, scale) |xv, s| f += (xv / s - 1.0) * (xv / s - 1.0);
             return f;
+        }
+        fn gradient(_: @This(), x: []const f64, grad: []f64) void {
+            for (x, scale, grad) |xv, s, *gv| gv.* = 2 * (xv / s - 1.0) / s;
         }
     };
     var x = [_]f64{ 0.0, 0.0 };
