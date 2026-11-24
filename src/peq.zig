@@ -370,9 +370,13 @@ const Kernel = struct {
     /// Response in dB. One logarithm of the ratio rather than a difference of
     /// two: the last bits move, the magnitude does not.
     inline fn response(self: Kernel, p: anytype) @TypeOf(p) {
-        const ratio = self.num(p) / self.den(p);
-        const ln = if (@typeInfo(@TypeOf(p)) == .vector) logLanes(ratio) else @log(ratio);
-        return splat(@TypeOf(p), scale) * ln;
+        return decibels(self.num(p) / self.den(p));
+    }
+
+    /// A power ratio in dB.
+    inline fn decibels(ratio: anytype) @TypeOf(ratio) {
+        const ln = if (@typeInfo(@TypeOf(ratio)) == .vector) logLanes(ratio) else @log(ratio);
+        return splat(@TypeOf(ratio), scale) * ln;
     }
 
     /// Derivative of `response(p)` with respect to the first `rows` of the
@@ -537,9 +541,11 @@ pub const Peq = struct {
     filt_fr: []f64,
     /// dMSE/d(cascade response), one entry per frequency.
     weights: []f64,
-    /// Each filter's hoisted coefficients from the last `lossAndGradient`,
-    /// so the gradient pass need not recompute them.
+    /// Each filter's hoisted coefficients from the last `evaluate`, so the
+    /// gradient pass need not recompute them.
     kernels: []Kernel,
+    /// The loss before its square root, also from the last `evaluate`.
+    squared: f64 = 0,
 
     /// Early-stop bookkeeping, mirroring `PEQ._callback`.
     stop: StopRules = .{},
@@ -671,12 +677,24 @@ pub const Peq = struct {
 
     /// Like `refresh`, but through the optimizer's own kernel, whose
     /// coefficients it keeps for the gradient pass that follows.
+    ///
+    /// Only the sharpness penalty reads a filter's own response. Without it
+    /// no row is written and `cascade` gives the sum directly.
     fn refreshWithKernels(self: *Peq) void {
         const n = self.f.len;
+        for (self.filters, self.kernels) |filt, *kern| kern.* = Kernel.init(filt, self.fs);
+        if (!self.sharpness) {
+            var i: usize = 0;
+            while (i + lanes <= n) : (i += lanes) {
+                const p: Lane = self.phi[i..][0..lanes].*;
+                self.fr[i..][0..lanes].* = self.cascade(p);
+            }
+            while (i < n) : (i += 1) self.fr[i] = self.cascade(self.phi[i]);
+            return;
+        }
         @memset(self.fr, 0);
-        for (self.filters, self.kernels, 0..) |filt, *kern, k| {
+        for (self.kernels, 0..) |kern, k| {
             const row = self.filt_fr[k * n ..][0..n];
-            kern.* = Kernel.init(filt, self.fs);
             var i: usize = 0;
             while (i + lanes <= n) : (i += lanes) {
                 const p: Lane = self.phi[i..][0..lanes].*;
@@ -686,6 +704,31 @@ pub const Peq = struct {
             for (self.fr, row) |*o, v| o.* += v;
         }
     }
+
+    /// Response of every filter together, in dB: one logarithm of the
+    /// product of their power ratios, where summing `Kernel.response` takes
+    /// one per filter.
+    ///
+    /// A product of power ratios can leave f64 where a sum of decibels
+    /// cannot, and `pipeline.run` takes as many filters as a caller spells
+    /// out, so the logarithm is taken every `cascade_run` filters. One run
+    /// stays finite until its filters together pass 3000 dB at one sample.
+    inline fn cascade(self: *const Peq, p: anytype) @TypeOf(p) {
+        const T = @TypeOf(p);
+        var db = Kernel.splat(T, 0.0);
+        var rest: []const Kernel = self.kernels;
+        while (rest.len > 0) {
+            const run = rest[0..@min(rest.len, cascade_run)];
+            var ratio = Kernel.splat(T, 1.0);
+            for (run) |kern| ratio *= kern.num(p) / kern.den(p);
+            db += Kernel.decibels(ratio);
+            rest = rest[run.len..];
+        }
+        return db;
+    }
+
+    /// `MAX_FILTERS` in the binding, so a bank it builds is one run.
+    const cascade_run = 32;
 
     /// Largest boost the cascade applies. `PEQ.max_gain`.
     pub fn maxGain(self: Peq) f64 {
@@ -753,15 +796,31 @@ pub const Peq = struct {
     }
 
     /// Loss and its analytic gradient at `params`.
+    pub fn lossAndGradient(self: *Peq, params: []const f64, grad: []f64) f64 {
+        const value = self.evaluate(params);
+        self.gradient(params, grad);
+        return value;
+    }
+
+    /// The objective `lbfgs.minimize` calls: the loss at `x`, through the
+    /// optimizer's kernel, leaving the filters set to `x` and everything
+    /// `gradient` needs in place.
+    pub fn evaluate(self: *Peq, x: []const f64) f64 {
+        self.setParams(x);
+        self.refreshWithKernels();
+        self.squared = self.squaredLoss();
+        return @sqrt(self.squared);
+    }
+
+    /// Analytic gradient of the loss at the point `evaluate` was last called
+    /// with, which is the only one the solver asks for.
     ///
     /// The chain runs loss -> cascade response -> one filter's response ->
     /// that filter's biquad coefficients -> log10(fc), Q, gain. Upstream has
     /// scipy finite-difference this instead, at roughly `3N+1` full loss
     /// evaluations per iteration.
-    pub fn lossAndGradient(self: *Peq, params: []const f64, grad: []f64) f64 {
-        self.setParams(params);
-        self.refreshWithKernels();
-        const squared = self.squaredLoss();
+    pub fn gradient(self: *Peq, _: []const f64, grad: []f64) void {
+        const squared = self.squared;
         const value = @sqrt(squared);
 
         const n = self.f.len;
@@ -799,31 +858,37 @@ pub const Peq = struct {
         for (self.filters, 0..) |filt, k| {
             const rows = filt.paramCount();
             if (rows == 0) continue;
-            const row = self.filt_fr[k * n ..][0..n];
-
-            // The sharpness penalty depends on the filter's own response and,
-            // through its sigmoid coefficient, directly on Q and gain.
-            const coef = sharpnessCoefficient(filt);
-            const dcoef = sharpnessCoefficientDerivatives(filt);
-            var fr_sq_sum: f64 = 0;
-            for (row) |v| fr_sq_sum += v * v;
-            const nf: f64 = @floatFromInt(n);
-            const wrt = parameterRows(filt);
-
             // Each derivative is folded into its dot products as it is
-            // produced, so the rows are never written out.
-            var dot_w: [3]f64 = undefined;
-            var dot_fr: [3]f64 = undefined;
+            // produced, so the rows are never written out: with the loss
+            // weights for every filter, and with the filter's own response
+            // where the sharpness penalty applies.
+            const penalized = self.sharpness and filt.kind == .peaking;
+            const row = self.filt_fr[k * n ..][0..n];
+            var dots: [2][3]f64 = undefined;
             switch (rows) {
-                inline 1...3 => |r| derivativeDots(r, self.kernels[k], self.phi, self.weights, row, dot_w[0..r], dot_fr[0..r]),
+                inline 1...3 => |r| if (penalized) {
+                    derivativeDots(r, 2, self.kernels[k], self.phi, .{ self.weights, row }, &dots);
+                } else {
+                    derivativeDots(r, 1, self.kernels[k], self.phi, .{self.weights}, dots[0..1]);
+                },
                 else => unreachable,
             }
 
+            // The penalty is mean((fr * coef)^2), and its sigmoid coefficient
+            // depends directly on Q and gain, so both factors vary.
+            const coef = sharpnessCoefficient(filt);
+            const dcoef = sharpnessCoefficientDerivatives(filt);
+            const wrt = parameterRows(filt);
+            const nf: f64 = @floatFromInt(n);
+            var fr_sq_sum: f64 = 0;
+            if (penalized) {
+                for (row) |v| fr_sq_sum += v * v;
+            }
+
             for (0..rows) |j| {
-                var g = dot_w[j];
-                if (self.sharpness and filt.kind == .peaking) {
-                    // d/dp mean((fr * coef)^2), both factors varying.
-                    g += 2.0 * coef * coef * dot_fr[j] / nf;
+                var g = dots[0][j];
+                if (penalized) {
+                    g += 2.0 * coef * coef * dots[1][j] / nf;
                     g += 2.0 * coef * dcoef[@backingInt(wrt.slice()[j])] * fr_sq_sum / nf;
                 }
                 // The loss is the square root of everything above.
@@ -832,42 +897,36 @@ pub const Peq = struct {
             i += rows;
         }
         std.debug.assert(i == grad.len);
-        return value;
     }
 
-    /// Dot products of each derivative row with the loss weights and with the
-    /// filter's own response, without ever writing a row out.
+    /// Dot product of each of a filter's derivative rows with each vector in
+    /// `with`, without ever writing a row out. `dots[v][j]` is row `j`
+    /// against `with[v]`.
     fn derivativeDots(
         comptime rows: usize,
+        comptime vectors: usize,
         kern: Kernel,
         phi: []const f64,
-        weights: []const f64,
-        fr: []const f64,
-        dot_w: *[rows]f64,
-        dot_fr: *[rows]f64,
+        with: [vectors][]const f64,
+        dots: *[vectors][3]f64,
     ) void {
-        var acc_w: [rows]Lane = @splat(@splat(0));
-        var acc_fr: [rows]Lane = @splat(@splat(0));
+        var acc: [vectors][rows]Lane = @splat(@splat(@splat(0)));
         var i: usize = 0;
         while (i + lanes <= phi.len) : (i += lanes) {
             const p: Lane = phi[i..][0..lanes].*;
-            const w: Lane = weights[i..][0..lanes].*;
-            const v: Lane = fr[i..][0..lanes].*;
             const dv = kern.derivatives(rows, p);
-            inline for (0..rows) |j| {
-                acc_w[j] += w * dv[j];
-                acc_fr[j] += v * dv[j];
+            inline for (0..vectors) |v| {
+                const w: Lane = with[v][i..][0..lanes].*;
+                inline for (0..rows) |j| acc[v][j] += w * dv[j];
             }
         }
-        inline for (0..rows) |j| {
-            dot_w[j] = @reduce(.Add, acc_w[j]);
-            dot_fr[j] = @reduce(.Add, acc_fr[j]);
+        inline for (0..vectors) |v| {
+            inline for (0..rows) |j| dots[v][j] = @reduce(.Add, acc[v][j]);
         }
         while (i < phi.len) : (i += 1) {
             const dv = kern.derivatives(rows, phi[i]);
-            inline for (0..rows) |j| {
-                dot_w[j] += weights[i] * dv[j];
-                dot_fr[j] += fr[i] * dv[j];
+            inline for (0..vectors) |v| {
+                inline for (0..rows) |j| dots[v][j] += with[v][i] * dv[j];
             }
         }
     }
@@ -937,11 +996,6 @@ pub const Peq = struct {
             .evaluations = result.evaluations,
             .status = result.status,
         };
-    }
-
-    /// The objective `lbfgs.minimize` calls.
-    pub fn evaluate(self: *Peq, x: []const f64, grad: []f64) f64 {
-        return self.lossAndGradient(x, grad);
     }
 
     /// `PEQ._callback`'s stopping rules, checked after each accepted step.
@@ -1391,6 +1445,36 @@ test "without the sharpness penalty the loss is the error alone" {
         }
     }
     try std.testing.expect(losses[0] > losses[1]);
+}
+
+test "without the penalty the cascade is the filters' sum, however many there are" {
+    const allocator = std.testing.allocator;
+    const f = try testGrid(allocator);
+    defer allocator.free(f);
+    const target = try allocator.alloc(f64, f.len);
+    defer allocator.free(target);
+    @memset(target, 0);
+
+    // 100 bands of 40 dB on one frequency: a power ratio of 1e400 there,
+    // which a single product cannot hold.
+    const filters = try peakingConfig(allocator, 100);
+    defer allocator.free(filters);
+    for (filters) |*filt| {
+        filt.fc = 1000.0;
+        filt.q = 1.0;
+        filt.gain = 40.0;
+    }
+    var peq = try Peq.init(allocator, f, 44100.0, filters, target, .{ .sharpness_penalty = false });
+    defer peq.deinit();
+
+    const params = try allocator.alloc(f64, peq.paramCount());
+    defer allocator.free(params);
+    peq.getParams(params);
+    try std.testing.expect(math.isFinite(peq.evaluate(params)));
+    const through_kernel = try allocator.dupe(f64, peq.fr);
+    defer allocator.free(through_kernel);
+    peq.refresh();
+    for (through_kernel, peq.fr) |a, b| try std.testing.expectApproxEqRel(b, a, 1e-9);
 }
 
 test "optimizing lowers the loss and respects the bounds" {

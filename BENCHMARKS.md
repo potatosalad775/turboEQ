@@ -336,6 +336,53 @@ logarithm sends 36% of 12-band fits and 70% of 20-band fits more than 1% up
 or down, which is why a change to the solver is judged over hundreds of
 curves and never over three.
 
+### A cheaper evaluation (2026-11-24)
+
+```sh
+node tools/soak/soak.mjs --target TARGET --peaking 8,18,28 --options '{"fit":"exact"}' \
+    --wasm BUILD.wasm --tsv BUILD.tsv MEASUREMENTS_DIR      # and without --options
+node tools/soak/compare.mjs before.tsv after.tsv
+```
+
+Two changes, measured together against the build before them. The line
+search prices a trial by its value alone and asks for the gradient once the
+trial is accepted: 17% of evaluations at 10 filters and 30% at 30 are rejected
+trials whose gradient was thrown away. And a fit without the sharpness
+penalty, which is `fit: 'exact'`, takes one logarithm per sample for the
+whole cascade where it took one per filter, and no longer keeps each filter's
+own response, which only the penalty reads.
+
+129 measurements, the sample set modernGraphTool ships
+(`defaults/data/phones`, Harman IE 2019v2), SIMD build, before and after
+interleaved over three rounds (two for the no-shelf row). The exact rows'
+time ratios agreed within 0.015 from round to round. Time and evaluations
+are ratios of the sum over all 129, loss the ratio fit by fit.
+
+| Options                | Filters | Time  | Mean fit, before | after  | Evals | Loss median | p10   | p90   | worse >1% | better >1% | Capped |
+| ---------------------- | ------- | ----- | ---------------- | ------ | ----- | ----------- | ----- | ----- | --------- | ---------- | ------ |
+| exact                  | 8 + 2   | 0.504 | 12 ms            | 6 ms   | 1.038 | 1.0000      | 1.000 | 1.000 | 4         | 4          | 0 → 0  |
+| exact                  | 18 + 2  | 0.437 | 243 ms           | 106 ms | 0.984 | 1.0001      | 0.884 | 1.131 | 39        | 33         | 0 → 0  |
+| exact                  | 28 + 2  | 0.395 | 1,161 ms         | 458 ms | 0.891 | 1.0003      | 0.867 | 1.104 | 49        | 48         | 10 → 4 |
+| exact, no shelves      | 28      | 0.433 | 2,171 ms         | 938 ms | 0.977 | 1.0006      | 0.934 | 1.051 | 42        | 27         | 10 → 9 |
+| default (with penalty) | 8 + 2   | 0.953 | 18 ms            | 17 ms  | 1.000 | 1.0000      | 1.000 | 1.000 | 0         | 0          | 0 → 0  |
+| default (with penalty) | 18 + 2  | 0.978 | 351 ms           | 343 ms | 1.000 | 1.0000      | 1.000 | 1.000 | 0         | 0          | 0 → 0  |
+
+**With the penalty every fit is the same to the bit**: the same loss, RMSE
+and evaluation count on all 258, so the rows above differ only by the
+gradients no longer computed, and by less than the rounds differ from each
+other (0.93 to 1.01). **Without it a fit takes 0.40 to 0.50 of the time**, and
+the loss moves the way a last-bit change moves it: a median of 1.000 and as
+many fits better as worse, except the no-shelf row, where 42 ended more than
+1% up and 27 down for a geometric mean of 1.007. The plain build's time
+ratios on the exact rows are 0.54, 0.46 and 0.41, and it returns the SIMD
+build's fits to the bit.
+
+Tried beside these and left out: keeping each filter's numerator and
+denominator from the response pass for the gradient pass was the same fits
+for 0.95 of the time and two more buffers, and one division per filter per
+sample where there are two was no faster at all. The time is in the
+logarithms, not the divisions.
+
 ---
 
 ## wasm module

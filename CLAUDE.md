@@ -85,13 +85,23 @@ with the faithful path as the default and the default path fixture-covered.
    the ratio, over `@Vector` lanes, so its last bits differ from
    `biquad.magnitude`. Everything the fixtures check, and `rmse` and
    `maxGain`, go through the latter; only the loss the solver reports and
-   steers by comes from the former.
+   steers by comes from the former. Without the sharpness penalty nothing
+   reads a filter's own response, so `Peq.cascade` takes one logarithm per
+   sample for every 32 filters together: half the cost of an evaluation, and
+   different last bits again, on that path only. It is per 32 and not per
+   bank because `run` takes any number of filters and their product would
+   leave f64. With the penalty the fit
+   is the one it was, to the bit.
 2. **The optimizer is box-constrained only.** Upstream calls `fmin_slsqp`
    with `bounds=` and no constraint functions. `src/lbfgs.zig`, a projected
    L-BFGS, is sufficient. You do not need SLSQP.
 3. **The gradients are analytic**, in `peq.zig`. scipy supplies none, so
    upstream spends roughly `3N+1` loss evaluations per iteration
-   finite-differencing them. That is most of the 23x to 190x.
+   finite-differencing them. That is most of the 23x to 190x. The solver
+   asks for the value and the gradient separately (`evaluate`, `gradient`),
+   because a rejected line-search trial needs only the value. `gradient` is
+   only ever called at the point of the latest `evaluate`, which
+   `Peq.gradient` relies on and a test in `lbfgs.zig` pins.
 4. **Optimizer parity is measured on achieved loss, never on filter
    parameters.** Different solvers land in different local minima of
    near-identical quality. This applies one level up too: in a cascade, each
